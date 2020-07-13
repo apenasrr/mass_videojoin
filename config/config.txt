@@ -1,0 +1,2 @@
+path_folder_output='none'
+size_per_file_mb='500'
