@@ -21,7 +21,11 @@ def change_width_height_mp4(path_file_video_origin, size_height,
 
     logging.info(f'Changing height to {size_height}: {path_file_video_origin}')
     size_height = str(size_height)
-    stringa = f'ffmpeg -y -i "{path_file_video_origin}" -vf scale={size_width}:{size_height},setsar=1:1 -c:v libx264 -c:a copy "{path_file_video_dest}"'
+    
+
+    # stringa = f'ffmpeg -y -i "{path_file_video_origin}" -vf scale={size_width}:{size_height},setsar=1:1 -c:v libx264 -c:a copy "{path_file_video_dest}"'
+    # for fix audio codec to aac | https://trac.ffmpeg.org/wiki/Encode/AAC
+    stringa = f'ffmpeg -y -i "{path_file_video_origin}" -vf scale={size_width}:{size_height},setsar=1:1 -c:v libx264 -c:a aac "{path_file_video_dest}"'
     os.system(stringa)
     logging.info(f'Done')
 
@@ -170,18 +174,30 @@ def get_video_details(filepath):
         l = l.strip()
         if l.startswith('Duration'):
             metadata['duration'] = re.search('Duration: (.*?),', l).group(0).split(':',1)[1].strip(' ,')
-            metadata['bitrate'] = re.search("bitrate: (\d+ kb/s)", l).group(0).split(':')[1].strip()
+            try:
+                metadata['bitrate'] = re.search("bitrate: (\d+ kb/s)", l).group(0).split(':')[1].strip()
+            except:
+                # .webm videos with encode Lavf56.40.101, may has 'Duration: N/A, start: -0.007000, bitrate: N/A'
+                metadata['bitrate'] = ''
         if l.startswith('Stream #0:0'):
             metadata['video'] = {}
             metadata['video']['codec'], metadata['video']['profile'] = \
                 [e.strip(' ,()') for e in re.search('Video: (.*? \(.*?\)),? ', l).group(0).split(':')[1].split('(')]
             metadata['video']['resolution'] = re.search('([1-9]\d+x\d+)', l).group(1)
-            metadata['video']['bitrate'] = re.search('(\d+ kb/s)', l).group(1)
+            try:
+                metadata['video']['bitrate'] = re.search('(\d+ kb/s)', l).group(1)
+            except:
+                # .webm videos with encode Lavf56.40.101, may has 'Video: vp9 (Profile 0), yuv420p(tv, bt709/unknown/unknown)'
+                metadata['video']['bitrate'] = ''
             metadata['video']['fps'] = re.search('(\d+ fps)', l).group(1)
         if l.startswith('Stream #0:1'):
             metadata['audio'] = {}
             metadata['audio']['codec'] = re.search('Audio: (.*?) ', l).group(1)
             metadata['audio']['frequency'] = re.search(', (.*? Hz),', l).group(1)
-            metadata['audio']['bitrate'] = re.search(', (\d+ kb/s)', l).group(1)
+            try:
+                metadata['audio']['bitrate'] = re.search(', (\d+ kb/s)', l).group(1)
+            except:
+                # .webm videos with encode Lavf56.40.101, may has 'Audio: opus, 48000 Hz, stereo, fltp (default)'
+                metadata['audio']['bitrate'] = ''
     return metadata
     
