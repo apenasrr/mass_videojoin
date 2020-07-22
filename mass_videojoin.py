@@ -46,7 +46,7 @@ def gen_report(path_dir):
     for root, dirs, files in os.walk(path_dir):
         for file in files:
             file_lower = file.lower()
-            if file_lower.endswith((".mp4")):
+            if file_lower.endswith((".mp4", ".webm")):
                 print(file)
                 
                 path_file = os.path.join(root, file)
@@ -59,7 +59,14 @@ def gen_report(path_dir):
                 d['file_folder'] = root
                 d['file_name'] = file
                 d['file_size'] = os.path.getsize(path_file)
-                d['duration'] = dict_inf['duration']
+                
+                try:
+                    d['duration'] = dict_inf['duration']
+                except:
+                    # sign of corrupt video file
+                    logging.error(f'File corrupt. Pathfile: {root}\\{file}')
+                    # skip to another file
+                    continue
                 d['bitrate'] = dict_inf['bitrate']
                 d['video_codec'] = dict_inf['video']['codec']
                 d['video_profile'] = dict_inf['video']['profile']
@@ -83,7 +90,8 @@ def gen_report(path_dir):
 
 def get_video_details_with_group(df):
 
-    df['key_join_checker'] = df['video_codec'] + '-' + \
+    df['key_join_checker'] = df['audio_codec'] + '-' + \
+                             df['video_codec'] + '-' + \
                              df['video_resolution']
 
     # set group_encode
@@ -193,15 +201,28 @@ def make_reencode(df):
         
         # todo reencode 
         # input path_folder_dest in column file_folder
-        df.loc[index, 'file_folder'] = path_folder_dest
+        df.loc[index, 'file_folder'] = os.path.abspath(path_folder_dest)
         # input path_file_name_dest in column file_name
         df.loc[index, 'file_name'] = path_file_name_dest
         
         change_width_height_mp4(path_file_origin, size_height, 
                                 size_width, path_file_dest)
+        
+        
         file_size = os.stat(path_file_dest).st_size
         df.loc[index, 'file_size'] = file_size
         df.loc[index, 'video_resolution'] = row['video_resolution_to_change']
+
+        # from encoded video get video metadata
+        metadata = get_video_details(path_file_dest)
+        # register video metadata
+        df.loc[index, 'bitrate'] = metadata['bitrate']
+        df.loc[index, 'video_bitrate'] = dict_inf['video']['bitrate']
+        df.loc[index, 'video_codec'] = metadata['video']['codec']
+        df.loc[index, 'audio_codec'] = metadata['audio']['codec']
+        df.loc[index, 'audio_bitrate']  = metadata['audio']['bitrate']
+        df.loc[index, 'duration'] = metadata['duration']
+        
     return df
         
         
