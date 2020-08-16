@@ -9,7 +9,7 @@
 --- Personal grouping criteria, like modules for video course  
 
 ## Notes:  
--- Works only with video .mp4 and .webm  
+-- Works with video .mp4, .webm, .avi, .ts, .vob, .mov  
 -- Require ffmpeg enabled on path system variables  
 
 ## How to use  
