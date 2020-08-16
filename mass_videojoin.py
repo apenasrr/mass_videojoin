@@ -10,7 +10,8 @@ import logging
 from video_tools import change_width_height_mp4, get_video_details, \
                         join_mp4, split_mp4
 from config_handler import handle_config_file
-
+import unidecode
+import natsort
 
 def logging_config():
 
@@ -32,12 +33,54 @@ def clean_cmd():
     
     clear = lambda: os.system('cls')
     clear()
+
+
+
+def df_sort_human(df):
+    """
+    Sort files and folders in human way. 
+    So after folder/file '1' comes '2', instead of '10' and '11'.
+    Simple yet flexible natural sorting in Python.
+    When you try to sort a list of strings that contain numbers, 
+    the normal python sort algorithm sorts lexicographically, 
+    so you might not get the results that you expect:
+    More info: https://github.com/SethMMorton/natsort
+    
+    :input: DataFrame. With columns [file_folder, file_name]
+    :return: DataFrame. Sort in a human way by [file_folder, file_name]
+    """
+
+    def sort_human(list_):
+    
+        list_ = natsort.natsorted(list_)
+    
+        return list_
+    
+    def sort_df_column_from_list(df, column_name, sorter):
+        """
+        :input: df: DataFrame
+        :input: column_name: String
+        :input: sorter: List
+        :return: DataFrame
+        """
+
+        sorterIndex = dict(zip(sorter, range(len(sorter))))
+        df['order'] = df[column_name].map(sorterIndex)
+        df.sort_values(['order'], ascending = [True ], inplace = True)
+        df.drop(['order', column_name], 1, inplace = True)
+
+        return df
+        
+    column_name = 'path_file'
+    df[column_name] = df['file_folder'] + '\\' + df['file_name']
+    list_path_file = df[column_name].tolist()
+    sorter = sort_human(list_path_file)
+    df = sort_df_column_from_list(df, column_name, sorter)
+    
+    return df
     
     
 def gen_report(path_dir):
-
-    # TODO improve sort file as windows explorer method
-    ## https://stackoverflow.com/questions/59436556/python-how-to-get-the-same-sorting-order-as-windows-file-name-sorting
 
     # TODO input more file video extension:
     ## https://dotwhat.net/type/video-movie-files
@@ -46,7 +89,7 @@ def gen_report(path_dir):
     for root, dirs, files in os.walk(path_dir):
         for file in files:
             file_lower = file.lower()
-            if file_lower.endswith((".mp4", ".webm")):
+            if file_lower.endswith((".mp4", ".avi", ".webm", '.ts', '.vob', '.mov')):
                 print(file)
                 
                 path_file = os.path.join(root, file)
@@ -154,18 +197,54 @@ def get_list_chunk_videos(df, max_size_mb):
     
     return list_final
     
-        
+
+def get_name_dir_upload():
+
+    file_folder_name = 'upload_folder_name.txt'
+    dir_name_saved = get_txt_content(file_folder_name)
+    return dir_name_saved
+
+
+def create_dir_upload():
+
+    path_folder_output = get_name_dir_upload()
+    folder_name = 'output_' + path_folder_output
+    ensure_folder_existence([folder_name])
+    
+    path_folder_output_video = os.path.join(folder_name, 'output_videos')
+    ensure_folder_existence([path_folder_output_video])
+    
+    return path_folder_output_video
+    
+    
 def join_videos(df, max_size_mb):
 
-    path_folder_output = userpref_folderoutput()
-    default_filename_output = input('Enter a default name for the joined ' +\
-                                    'videos: ')      
+    def get_start_index_output():
+    
+        print('Start output file count with what value?')
+        add_num = input('(None for 1) Answer: ')
+        if add_num == '':
+            add_num = 1
+        else:
+            add_num = int(add_num)
+        return add_num
+
+    # path_folder_output = userpref_folderoutput()
+    path_folder_output = create_dir_upload()
+    
+    # default_filename_output = input('Enter a default name for the joined ' +\
+                                    # 'videos: ')      
+    default_filename_output = get_name_dir_upload()
     
     df['file_path'] = df['file_folder'] + '\\' + df['file_name']
     list_chunk_videos = get_list_chunk_videos(df, max_size_mb)
     df['file_output'] = ''
+    
+    # set start index output file
+    add_num = get_start_index_output()
+    
     for index, list_file_path in enumerate(list_chunk_videos):
-        file_count = index+1
+        file_count = index + add_num
         file_name_output = f'{default_filename_output}-%03d.mp4' % file_count
         file_path_output = os.path.join(path_folder_output, file_name_output)
         join_mp4(list_file_path, file_path_output)
@@ -217,7 +296,7 @@ def make_reencode(df):
         metadata = get_video_details(path_file_dest)
         # register video metadata
         df.loc[index, 'bitrate'] = metadata['bitrate']
-        df.loc[index, 'video_bitrate'] = dict_inf['video']['bitrate']
+        df.loc[index, 'video_bitrate'] = metadata['video']['bitrate']
         df.loc[index, 'video_codec'] = metadata['video']['codec']
         df.loc[index, 'audio_codec'] = metadata['audio']['codec']
         df.loc[index, 'audio_bitrate']  = metadata['audio']['bitrate']
@@ -465,6 +544,98 @@ def ensure_folders_existence():
     ensure_folder_existence(folders_name)
   
   
+def get_txt_content(file_path):
+
+    file = open(file_path,'r', encoding='utf-8')
+    file_content = file.readlines()
+    file_content = ''.join(file_content)
+    file.close()
+
+    return file_content
+
+
+def create_txt(file_path, stringa):
+
+    f = open(file_path, "w", encoding='utf8')
+    f.write(stringa)
+    f.close()
+
+
+def get_folder_name_normalized(path_dir):
+
+    def normalize_string_to_link(string_actual):
+
+        string_new = unidecode.unidecode(string_actual)
+        
+        for c in r"!@#$%^&*()[]{};:,./<>?\|`~-=_+":
+            string_new = string_new.translate({ord(c): "_"})
+            
+        string_new = string_new.replace(' ', '_')
+        string_new = string_new.replace('___', '_')
+        string_new = string_new.replace('__', '_')
+        
+        return string_new
+        
+    dir_name = os.path.basename(path_dir)
+    dir_name_normalize = normalize_string_to_link(dir_name)
+
+    return dir_name_normalize
+
+
+def save_upload_folder_name(path_dir):
+
+    file_folder_name = 'upload_folder_name.txt'
+    dir_name_normalize = get_folder_name_normalized(path_dir)
+    create_txt(file_folder_name, dir_name_normalize)
+    
+
+
+def prefill_video_resolution_to_change(df):
+
+    df['key_join_checker'] = df['audio_codec'] + '-' + \
+                             df['video_codec'] + '-' + \
+                             df['video_resolution']
+    
+    df_key = df[['key_join_checker', 'duration', 'video_resolution']].copy()
+    df_key['duration_timedelta'] = pd.to_timedelta(df_key['duration'])
+    df_key['duration_min'] = df_key['duration_timedelta'].dt.total_seconds()/60
+    
+    df_key.drop('duration', axis=1, inplace=True)
+    
+    df_key_agg = df_key.groupby(['key_join_checker', 
+                                 'video_resolution'])['duration_min'].agg('sum')
+    # convert in dataframe
+    df_key_agg = df_key_agg.reset_index()
+    # sort dataframe
+    df_key_agg = df_key_agg.sort_values(['duration_min'], ascending=[False])
+    
+    print('\n', df_key_agg)
+    index_max = df_key_agg['duration_min'].idxmax()
+    key_join_main = df_key_agg.loc[index_max, 'key_join_checker']
+    video_resolution_main = df_key_agg.loc[index_max, 'video_resolution']
+    
+    
+    # informar quantidade de minutos para reencodar
+    mask_to_convert = ~df_key_agg.index.isin([index_max])
+    minutes_to_reencode = df_key_agg.loc[mask_to_convert, 'duration_min'].sum()
+    minutes_total = df_key_agg['duration_min'].sum()
+    percent_to_reencode = minutes_to_reencode/minutes_total
+    print(f'The main profile is "{key_join_main}"')
+    
+    # informar percentual de minutos para reencodar
+    # the command ':.1f' fix 1 digit after decimal point
+    print(f'There is {minutes_to_reencode:.1f} minutes ' + \
+          f'({percent_to_reencode*100:.0f}%) to reencode')
+    
+    
+    mask_resolution_to_change = ~df['key_join_checker'].isin([key_join_main])
+    df.loc[mask_resolution_to_change, 
+           'video_resolution_to_change'] = video_resolution_main
+    df.drop('key_join_checker', axis=1, inplace=True)
+    
+    return df
+    
+    
 def main():
     
     ensure_folders_existence()
@@ -473,11 +644,24 @@ def main():
     if menu_answer == 1:
         # create Dataframe of video details
         path_dir = input('\nPaste the folder link where are the video files: ')
+        
+        # save in txt, the folder name
+        save_upload_folder_name(path_dir)
+        
         df = gen_report(path_dir)
+        
+        # sort path_file by natural human way
+        df = df_sort_human(df)
+        
         df.to_excel('video_details.xlsx', index=False)
-        print(f'\nMake sure that the files in video_details.xlsx are in ' + \
-              f'order \n and inform, if necessary, resolutions ' + \
-              f'for reencode in the video_resolution_to_change column')
+        
+        df = pd.read_excel(f'video_details.xlsx')
+        # prefill column video_resolution_to_change
+        df = prefill_video_resolution_to_change(df)
+        
+        df.to_excel('video_details.xlsx', index=False)
+        print(f'\nIf necessary, change the reencode plan in the column ' + \
+              f'"video_resolution_to_change"')
         break_point = input('Type Enter to continue')
         clean_cmd()
         main()
