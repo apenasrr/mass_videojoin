@@ -12,6 +12,8 @@ from video_tools import change_width_height_mp4, get_video_details, \
 from config_handler import handle_config_file
 import unidecode
 import natsort
+import glob
+
 
 def logging_config():
 
@@ -33,7 +35,6 @@ def clean_cmd():
     
     clear = lambda: os.system('cls')
     clear()
-
 
 
 def df_sort_human(df):
@@ -89,7 +90,8 @@ def gen_report(path_dir):
     for root, dirs, files in os.walk(path_dir):
         for file in files:
             file_lower = file.lower()
-            if file_lower.endswith((".mp4", ".avi", ".webm", '.ts', '.vob', '.mov')):
+            if file_lower.endswith((".mp4", ".avi", ".webm", '.ts', '.vob', 
+                                    '.mov')):
                 print(file)
                 
                 path_file = os.path.join(root, file)
@@ -106,15 +108,15 @@ def gen_report(path_dir):
                 try:
                     d['duration'] = dict_inf['duration']
                 except:
-                    # sign of corrupt video file
-                    logging.error(f'File corrupt. Pathfile: {root}\\{file}')
-                    # skip to another file
-                    continue
+                    logging.error('video without duration: {path_file}')
+                    d['duration'] = ''
+
                 d['bitrate'] = dict_inf['bitrate']
                 d['video_codec'] = dict_inf['video']['codec']
                 d['video_profile'] = dict_inf['video']['profile']
                 d['video_resolution'] = dict_inf['video']['resolution']
                 d['video_bitrate'] = dict_inf['video']['bitrate']
+                
                 # some videos dont have audio
                 try:
                     d['audio_codec'] = dict_inf['audio']['codec']
@@ -198,16 +200,17 @@ def get_list_chunk_videos(df, max_size_mb):
     return list_final
     
 
-def get_name_dir_upload():
+def get_name_dir_origin():
 
-    file_folder_name = 'upload_folder_name.txt'
-    dir_name_saved = get_txt_content(file_folder_name)
+    name_file_folder_name = get_txt_folder_origin()
+    dir_name_saved = get_txt_content(name_file_folder_name)
+    
     return dir_name_saved
 
 
-def create_dir_upload():
+def get_path_folder_output_video():
 
-    path_folder_output = get_name_dir_upload()
+    path_folder_output = get_name_dir_origin()
     folder_name = 'output_' + path_folder_output
     ensure_folder_existence([folder_name])
     
@@ -217,34 +220,22 @@ def create_dir_upload():
     return path_folder_output_video
     
     
-def join_videos(df, max_size_mb):
-
-    def get_start_index_output():
-    
-        print('Start output file count with what value?')
-        add_num = input('(None for 1) Answer: ')
-        if add_num == '':
-            add_num = 1
-        else:
-            add_num = int(add_num)
-        return add_num
+def join_videos(df, max_size_mb, start_index_output):
 
     # path_folder_output = userpref_folderoutput()
-    path_folder_output = create_dir_upload()
+    path_folder_output = get_path_folder_output_video()
     
     # default_filename_output = input('Enter a default name for the joined ' +\
                                     # 'videos: ')      
-    default_filename_output = get_name_dir_upload()
+    default_filename_output = get_name_dir_origin()
     
     df['file_path'] = df['file_folder'] + '\\' + df['file_name']
     list_chunk_videos = get_list_chunk_videos(df, max_size_mb)
     df['file_output'] = ''
     
-    # set start index output file
-    add_num = get_start_index_output()
     
     for index, list_file_path in enumerate(list_chunk_videos):
-        file_count = index + add_num
+        file_count = index + start_index_output
         file_name_output = f'{default_filename_output}-%03d.mp4' % file_count
         file_path_output = os.path.join(path_folder_output, file_name_output)
         join_mp4(list_file_path, file_path_output)
@@ -258,7 +249,21 @@ def join_videos(df, max_size_mb):
     return df
 
 
+def exclude_all_files_from_folder(path_folder):
+    
+        path_folder_regex = os.path.join(path_folder, '*')
+        r = glob.glob(path_folder_regex)
+        for i in r:
+            os.remove(i)
+    
+
 def make_reencode(df):
+
+    folder_script_path = get_folder_script_path()
+    path_folder_encoded = os.path.join(folder_script_path, 'videos_encoded')
+    exclude_all_files_from_folder(path_folder_encoded)
+    
+    # exclude_folder_videos_encoded()
 
     df['file_folder_origin'] = df['file_folder']
     df['file_name_origin'] = df['file_name']
@@ -267,13 +272,15 @@ def make_reencode(df):
     mask_df_to_reencode = ~df['video_resolution_to_change'].isna()
     df_to_reencode = df.loc[mask_df_to_reencode, :]
     
+    folder_script_path = get_folder_script_path()
+    path_folder_dest = os.path.join(folder_script_path, 'videos_encoded')
     for index, row in df_to_reencode.iterrows():
         size_width, size_height = row['video_resolution_to_change'].split('x')
         
         path_file_origin = os.path.join(row['file_folder_origin'], 
                                         row['file_name_origin'])
         print(path_file_origin)
-        path_folder_dest = r'videos_encoded'
+        # path_folder_dest = r'videos_encoded'
         path_file_name_dest = str(index) + '.mp4'
         path_file_dest = os.path.join(path_folder_dest,
                                       path_file_name_dest)
@@ -470,9 +477,11 @@ def search_to_split_videos(df, mb_limit):
     size_limit = (mb_limit-recoil_mbsize) * 1024**2
     list_file_path_origin = get_list_file_path_origin(df=df, 
                                                       size_limit=size_limit)
+    folder_script_path = get_folder_script_path()
+    output_folder_path = os.path.join(folder_script_path, 'videos_splitted')
+    exclude_all_files_from_folder(output_folder_path)
     
     for file_path_origin in list_file_path_origin:
-        output_folder_path = r'videos_splitted'
         list_filepath_output = split_mp4(largefile_path=file_path_origin, 
                                          recoil=recoil_sec, 
                                          mb_limit=mb_limit, 
@@ -507,7 +516,8 @@ def userpref_folderoutput():
 
 def userpref_size_per_file_mb():
     
-    path_file = os.path.join('config', 'config.txt')
+    folder_script_path = get_folder_script_path()
+    path_file = os.path.join(folder_script_path, 'config', 'config.txt')
     variable_name = 'size_per_file_mb'
     
     question = 'What should be the maximum size of each ' + \
@@ -530,18 +540,29 @@ def userpref_size_per_file_mb():
     return value_got
     
     
-def ensure_folder_existence(folders_name):
+def ensure_folder_existence(folders_path):
+    """
+    :input: folders_path: List
+    """
     
-    for folder_name in folders_name:
-        existence = os.path.isdir(f'./{folder_name}')
+    for folder_path in folders_path:
+        existence = os.path.isdir(folder_path)
         if existence is False:
-            os.mkdir(folder_name)
+            os.mkdir(folder_path)
 
             
 def ensure_folders_existence():
 
+    folder_script_path_relative = os.path.dirname(__file__)
+    folder_script_path = os.path.realpath(folder_script_path_relative)
+    
     folders_name = ['ts', 'videos_encoded', 'config', 'videos_splitted']
-    ensure_folder_existence(folders_name)
+    folders_path = []
+    for folder_name in folders_name:
+        folder_path = os.path.join(folder_script_path, folder_name)
+        folders_path.append(folder_path)
+    
+    ensure_folder_existence(folders_path)
   
   
 def get_txt_content(file_path):
@@ -580,14 +601,6 @@ def get_folder_name_normalized(path_dir):
     dir_name_normalize = normalize_string_to_link(dir_name)
 
     return dir_name_normalize
-
-
-def save_upload_folder_name(path_dir):
-
-    file_folder_name = 'upload_folder_name.txt'
-    dir_name_normalize = get_folder_name_normalized(path_dir)
-    create_txt(file_folder_name, dir_name_normalize)
-    
 
 
 def prefill_video_resolution_to_change(df):
@@ -636,9 +649,126 @@ def prefill_video_resolution_to_change(df):
     return df
     
     
+def save_upload_folder_name(path_dir, file_folder_name):
+
+    dir_name_normalize = get_folder_name_normalized(path_dir)
+    create_txt(file_path=file_folder_name, stringa=dir_name_normalize)
+
+
+def create_report_backup(df, path_file_report, tag):
+
+    path_folder = os.path.dirname(path_file_report)
+    file_name = os.path.basename(path_file_report)
+    file_name_without_extension = os.path.splitext(file_name)[0]
+    file_name_backup = file_name_without_extension + "_" + tag + ".xlsx"
+    path_file_backup = os.path.join(path_folder, file_name_backup)
+    df.to_excel(path_file_backup, index=False)
+
+
+def step_create_report_filled(path_dir, path_file_report):
+
+    df = gen_report(path_dir)
+    # sort path_file by natural human way
+    df = df_sort_human(df)
+    # prefill column video_resolution_to_change
+    df = prefill_video_resolution_to_change(df)
+    df.to_excel(path_file_report, index=False)
+    
+    #Make backup
+    create_report_backup(df=df, path_file_report=path_file_report, tag='origin')
+    
+
+def set_make_reencode(path_file_report):
+
+    df = pd.read_excel(path_file_report)
+    df = make_reencode(df)
+    df.to_excel(path_file_report, index=False)
+    
+    #make backup
+    create_report_backup(df=df, path_file_report=path_file_report, tag='reencode')    
+    print('\nReencode finished')
+
+
+def set_group_column(path_file_report):
+
+    # update video_details with groups
+    
+    df = pd.read_excel(path_file_report)    
+    df = get_video_details_with_group(df)
+    df.to_excel(path_file_report, index=False)
+    print(f"File '{path_file_report}' was updated with " + \
+          f"group column to fast join\n")
+    # backup is not performed here as the grouping can be adjusted manually
+    
+
+def set_split_videos(path_file_report, mb_limit):
+
+    df = pd.read_excel(path_file_report)
+    
+    #backup group, after adjusted manually
+    create_report_backup(df=df, path_file_report=path_file_report, tag='grouped')
+    
+    # Find for file_video too big and split them
+    df = search_to_split_videos(df, mb_limit=mb_limit)
+    
+    df.to_excel(path_file_report, index=False)    
+    
+    create_report_backup(df=df, path_file_report=path_file_report, tag='splited')
+    
+
+def set_join_videos(path_file_report, mb_limit, start_index_output):
+        
+    df = pd.read_excel(path_file_report)                         
+    df = join_videos(df, mb_limit, start_index_output)
+    df.to_excel(path_file_report, index=False)
+    
+    #backup joined
+    create_report_backup(df=df, path_file_report=path_file_report, tag='joined')
+
+
+def get_folder_script_path():
+
+    folder_script_path_relative = os.path.dirname(__file__)
+    folder_script_path = os.path.realpath(folder_script_path_relative)
+    
+    return folder_script_path
+    
+    
+def set_path_file_report():
+
+    folder_path_output_relative = 'output_' + get_name_dir_origin()
+    ensure_folder_existence([folder_path_output_relative])
+    path_file_report = os.path.join(folder_path_output_relative, 
+                                    'video_details.xlsx')
+    
+    return path_file_report
+    
+
+def get_txt_folder_origin():
+    
+    file_folder_name = 'folder_files_origin.txt'
+    
+    return file_folder_name
+    
+
+def get_start_index_output():
+
+    print('Start output file count with what value?')
+    add_num = input('(None for 1) Answer: ')
+    if add_num == '':
+        add_num = 1
+    else:
+        add_num = int(add_num)
+    return add_num
+
+
 def main():
     
     ensure_folders_existence()
+    file_name_folder_origin = get_txt_folder_origin()
+    
+    path_file_report = set_path_file_report()
+    
     menu_answer = menu_ask()
     
     if menu_answer == 1:
@@ -646,71 +776,54 @@ def main():
         path_dir = input('\nPaste the folder link where are the video files: ')
         
         # save in txt, the folder name
-        save_upload_folder_name(path_dir)
+        save_upload_folder_name(path_dir, file_name_folder_origin)
         
-        df = gen_report(path_dir)
+        path_file_report = set_path_file_report()
         
-        # sort path_file by natural human way
-        df = df_sort_human(df)
+        step_create_report_filled(path_dir, path_file_report)
         
-        df.to_excel('video_details.xlsx', index=False)
-        
-        df = pd.read_excel(f'video_details.xlsx')
-        # prefill column video_resolution_to_change
-        df = prefill_video_resolution_to_change(df)
-        
-        df.to_excel('video_details.xlsx', index=False)
         print(f'\nIf necessary, change the reencode plan in the column ' + \
               f'"video_resolution_to_change"')
+              
         break_point = input('Type Enter to continue')
         clean_cmd()
         main()
         return
         
     elif menu_answer == 2:
+
         # reencode videos mark in column video_resolution_to_change
-        df = pd.read_excel(f'video_details.xlsx')
-        df = make_reencode(df)
-        df.to_excel('video_details.xlsx', index=False)  
-        print('Reencode finished')
+        set_make_reencode(path_file_report)
+        
         break_point = input('Review the file and then type something to ' + \
                             'continue.')
-                            
-        df = pd.read_excel(f'video_details.xlsx')
         clean_cmd()
         main()
         return
-    else:
-        pass
         
-    df = pd.read_excel(f'video_details.xlsx')
+    elif menu_answer == 3:
         
-    # update video_details with groups
-    df = get_video_details_with_group(df)
-    df.to_excel('video_details.xlsx', index=False)
-    print("File 'video_details.xlsx' was updated with " + \
-          "group column to fast join\n")
-    
-    break_point = input('Review the file and then type something to start ' + \
-                        'the process that look for videos that are too ' + \
-                        'big and should be splitted')
-    df = pd.read_excel('video_details.xlsx') 
-    
-    mb_limit = int(userpref_size_per_file_mb())
-    
-    # Find for file_video too big and split them
-    df = search_to_split_videos(df, mb_limit=mb_limit)
-    df.to_excel('video_details.xlsx', index=False)    
+        mb_limit = int(userpref_size_per_file_mb())
+        
+        # establishes separation criteria for the join videos step
+        set_group_column(path_file_report)
+        
+        break_point = input('Review the file and then type something to ' + \
+                            'start the process that look for videos that ' + \
+                            'are too big and should be splitted')
+        
+        set_split_videos(path_file_report, mb_limit)
+        
+        # set start index output file
+        start_index_output = get_start_index_output()
 
-    break_point = input('Review the file and then type something to start '+
-                        'the videos join process')
+        # join all videos
+        set_join_videos(path_file_report, mb_limit, start_index_output)
+        return
+    else:
     
-    # join all videos
-    df = pd.read_excel(f'video_details.xlsx')                         
-    df = join_videos(df, mb_limit)
-    df.to_excel('video_details.xlsx', index=False)
-    
-    
+        return
+        
 if __name__ == "__main__":
     logging_config()
     main()
