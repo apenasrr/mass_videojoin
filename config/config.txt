@@ -1,2 +1,2 @@
 path_folder_output='none'
-size_per_file_mb='500'
+size_per_file_mb='1024'
