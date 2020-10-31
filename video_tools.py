@@ -39,7 +39,9 @@ def change_width_height_mp4(path_file_video_origin, size_height,
     More info: https://www.reck.dk/ffmpeg-autoscale-on-height-or-width/
     :input: size_height: Eg. 480 or 720 or 1080...
     """
-
+    # TODO include change of audio codec and video codec. optional argument. \
+    ## Useful to change for the 'main codecs' of the loot
+    
     logging.info(f'Changing height to {size_height}: {path_file_video_origin}')
     
     maxrate = get_maxrate(size_height)
@@ -54,6 +56,7 @@ def change_width_height_mp4(path_file_video_origin, size_height,
               f'-vf scale={size_width}:{size_height},setsar=1:1 ' + \
               f'-c:v libx264 -maxrate {str_maxrate}k ' + \
               f'-bufsize {str_bufsize}k -c:a aac "{path_file_video_dest}"'
+              
     os.system(stringa)
     logging.info(f'Done')
 
@@ -162,16 +165,19 @@ def join_mp4(list_file_path, file_name_output):
     # copy to .ts
     list_path_file_name_ts = []
     logging.info('Convert files to TS: ')
+    
+    folder_script_path_relative = os.path.dirname(__file__)
+    folder_script_path = os.path.realpath(folder_script_path_relative)
     for index, file_path in enumerate(list_file_path):
         logging.info(f'"{index+1}.ts" from "{file_path}"')
-        path_file_name_ts = f'ts/{index+1}.ts'
+        file_name_ts = f'{index+1}.ts'
+        path_file_name_ts = os.path.join(folder_script_path, 'ts', file_name_ts)
         os.system("ffmpeg -i " + '"' + file_path + '"' + \
                   " -c copy -bsf:v h264_mp4toannexb -f mpegts " + \
-                  f'ts/{index+1}.ts')
+                  path_file_name_ts)
         list_path_file_name_ts.append(path_file_name_ts)
     
     
-    # list_path_file_name_ts = ['ts/1.ts', 'ts/2.ts', 'ts/3.ts', 'ts/4.ts']
     logging.info('\n')
     logging.info('Join files from TS to MP4: ')
     stringa = "ffmpeg -i \"concat:"
@@ -181,6 +187,7 @@ def join_mp4(list_file_path, file_name_output):
         if index != index_final:
             stringa += "|"
         else:
+            # stringa += f"\" -c copy  -bsf:a aac_adtstoasc " + \
             stringa += f"\" -c copy  -bsf:a aac_adtstoasc " + \
                        f"{file_name_output}"
     
@@ -192,11 +199,29 @@ def join_mp4(list_file_path, file_name_output):
 
 def get_video_details(filepath):
 
-    file_temp = 'detail.txt'
+    folder_script_path_relative = os.path.dirname(__file__)
+    folder_script_path = os.path.realpath(folder_script_path_relative)
+    file_temp = os.path.join(folder_script_path, 'detail.txt')
+    
+    #create temp file
+    open(file_temp, 'a').close()
+    
+    #open temp file
     tmpf = open(file_temp,'r', encoding='utf-8')
+    
+    #fill temp file with video metadata using ffmpeg
     os.system("ffmpeg -i \"%s\" 2> %s" % (filepath, file_temp))
+    
+    #read temp file
     lines = tmpf.readlines()
+    
+    #close temp file
     tmpf.close()
+    
+    #delete temp file
+    # os.remove(file_temp)
+
+    #parse content
     metadata = {}
     for l in lines:
         l = l.strip()
@@ -209,17 +234,26 @@ def get_video_details(filepath):
                 metadata['bitrate'] = ''
                 
         if 'Video: ' in l:
+            if 'video' in metadata:
+                # if has another line of 'Video: ', possible of screens, ignore. e.g:
+                # Stream #0:2: Video: bmp, bgra, 640x360, 90k tbr, 90k tbn, 90k tbc (attached pic)
+                continue
             metadata['video'] = {}
             metadata['video']['codec'], metadata['video']['profile'] = \
                 [e.strip(' ,()') for e in re.search('Video: (.*? \(.*?\)),? ', l).group(0).split(':')[1].split('(')]
             metadata['video']['resolution'] = re.search('([1-9]\d+x\d+)', l).group(1)
+
             try:
                 metadata['video']['bitrate'] = re.search('(\d+ kb/s)', l).group(1)
             except:
                 # .webm videos with encode Lavf56.40.101, may has 'Video: vp9 (Profile 0), yuv420p(tv, bt709/unknown/unknown)'
                 metadata['video']['bitrate'] = ''
-            metadata['video']['fps'] = re.search('(\d+ fps)', l).group(1)
-            
+            try:
+                metadata['video']['fps'] = re.search('(\d+ fps)', l).group(1)
+            except:
+                metadata['video']['fps'] = ''
+        
+        
         if 'Audio: ' in l:
             metadata['audio'] = {}
             metadata['audio']['codec'] = re.search('Audio: (.*?) ', l).group(1)
@@ -229,5 +263,12 @@ def get_video_details(filepath):
             except:
                 # .webm videos with encode Lavf56.40.101, may has 'Audio: opus, 48000 Hz, stereo, fltp (default)'
                 metadata['audio']['bitrate'] = ''
+    
+    if 'audio' not in metadata:
+        metadata['audio'] = {}
+        metadata['audio']['codec'] = ''
+        metadata['audio']['frequency'] = ''
+        metadata['audio']['bitrate'] = ''
+    
     return metadata
     
