@@ -1,6 +1,8 @@
 """
     Create by: apenasrr
     Source: https://github.com/apenasrr/mass_videojoin
+    
+    A smart tool to optimize and make turbo join in a massive video collection
 """
 
 import os
@@ -85,22 +87,29 @@ def gen_report(path_dir):
 
     # TODO input more file video extension:
     ## https://dotwhat.net/type/video-movie-files
-    
+
+    tuple_video_extension = (".mp4", ".avi", ".webm", '.ts', '.vob', 
+                             '.mov', '.mkv', '.wmv')
+    str_tuple_video_extension = ', '.join(tuple_video_extension)
+    logging.info(f'Find for video with extension: {str_tuple_video_extension}')
     l=[]
     for root, dirs, files in os.walk(path_dir):
+        
         for file in files:
             file_lower = file.lower()
-            if file_lower.endswith((".mp4", ".avi", ".webm", '.ts', '.vob', 
-                                    '.mov')):
-                print(file)
+            if file_lower.endswith(tuple_video_extension):
+                logging.info(f'Selected file: {file}')
                 
                 path_file = os.path.join(root, file)
                 dict_inf = get_video_details(path_file)
                 (mode, ino, dev, nlink, uid, 
                 gid, size, atime, mtime, ctime) = os.stat(path_file) 
                 mtime = datetime.datetime.fromtimestamp(mtime)
+                
                 d={}
                 d['mtime']=mtime
+                ctime = datetime.datetime.fromtimestamp(ctime)
+                d['creation_time'] = ctime
                 d['file_folder'] = root
                 d['file_name'] = file
                 d['file_size'] = os.path.getsize(path_file)
@@ -128,6 +137,8 @@ def gen_report(path_dir):
                     d['audio_bitrate'] = ''
                 d['video_resolution_to_change'] = ''
                 l.append(d)
+            else:
+                logging.info(f'Unselected file: {file}')
     df = pd.DataFrame(l)
     
     return df
@@ -285,7 +296,7 @@ def make_reencode(df):
         path_file_dest = os.path.join(path_folder_dest,
                                       path_file_name_dest)
         
-        # todo reencode 
+        # reencode 
         # input path_folder_dest in column file_folder
         df.loc[index, 'file_folder'] = os.path.abspath(path_folder_dest)
         # input path_file_name_dest in column file_name
@@ -556,7 +567,7 @@ def ensure_folders_existence():
     folder_script_path_relative = os.path.dirname(__file__)
     folder_script_path = os.path.realpath(folder_script_path_relative)
     
-    folders_name = ['ts', 'videos_encoded', 'config', 'videos_splitted']
+    folders_name = ['ts', 'videos_encoded', 'videos_join', 'config', 'videos_splitted']
     folders_path = []
     for folder_name in folders_name:
         folder_path = os.path.join(folder_script_path, folder_name)
@@ -605,6 +616,8 @@ def get_folder_name_normalized(path_dir):
 
 def prefill_video_resolution_to_change(df):
 
+    #TODO identify the main main profile that has 'audiocodec aac' and 'videocodec libx264'
+    
     df['key_join_checker'] = df['audio_codec'] + '-' + \
                              df['video_codec'] + '-' + \
                              df['video_resolution']
@@ -765,6 +778,7 @@ def get_start_index_output():
 def main():
     
     ensure_folders_existence()
+    # ensure file exist
     file_name_folder_origin = get_txt_folder_origin()
     
     path_file_report = set_path_file_report()
