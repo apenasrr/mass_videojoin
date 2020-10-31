@@ -9,12 +9,16 @@
 --- Personal grouping criteria, like modules for video course  
 
 ## Notes:  
--- Works with video .mp4, .webm, .avi, .ts, .vob, .mov  
+-- Works with video .mp4, .webm, .avi, .ts, .vob, .mov, .mkv, .wmv
 -- Require ffmpeg enabled on path system variables  
 
 ## How to use  
-1. Execute mass_videojoin.py  
-2. Navigate through the iterative menu, applying the ordered steps of the process  
+If it's your first time using the tool  
+1. Execute update_libs.bat  
+
+For the next times  
+2. Execute mass_videojoin.bat  
+3. Navigate through the iterative menu, applying the ordered steps of the process  
 
 ---
 Do you wish to buy a coffee to say thanks?  
@@ -24,3 +28,4 @@ LBC (from LBRY) digital Wallet
 ### We recommend:  
 [mises.org](https://mises.org/) - Educate yourself about economic and political freedom  
 [lbry.tv](http://lbry.tv/) - Store files and videos on blockchain ensuring free speech  
+[A Cypherpunk's Manifesto](https://www.activism.net/cypherpunk/manifesto.html) - How encryption is essential to Free Speech and Privacy  
