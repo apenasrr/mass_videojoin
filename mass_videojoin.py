@@ -117,11 +117,19 @@ def gen_report(path_dir):
                 try:
                     d['duration'] = dict_inf['duration']
                 except:
-                    logging.error('video without duration: {path_file}')
+                    logging.error(f'Video without duration:\n{path_file}\n' + \
+                                  f'Please check and delete the file if ' + \
+                                  f'necessary')
+                                  
                     d['duration'] = ''
 
                 d['bitrate'] = dict_inf['bitrate']
-                d['video_codec'] = dict_inf['video']['codec']
+                try:
+                    d['video_codec'] = dict_inf['video']['codec']
+                except:
+                    logging.error(f'File above dont have tag "video" in ' + \
+                                  f'detail file:\n{file}')
+                    continue
                 d['video_profile'] = dict_inf['video']['profile']
                 d['video_resolution'] = dict_inf['video']['resolution']
                 d['video_bitrate'] = dict_inf['video']['bitrate']
