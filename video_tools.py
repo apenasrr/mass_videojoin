@@ -8,6 +8,7 @@ import logging
 import re
 import glob
 import subprocess
+from datetime import timedelta
 
 
 def get_maxrate(size_height):
@@ -47,7 +48,6 @@ def change_width_height_mp4(path_file_video_origin, size_height,
     str_maxrate = str(maxrate)
     size_height = str(size_height)
 
-    # stringa = f'ffmpeg -y -i "{path_file_video_origin}" -vf scale={size_width}:{size_height},setsar=1:1 -c:v libx264 -c:a copy "{path_file_video_dest}"'
     # for fix audio codec to aac | https://trac.ffmpeg.org/wiki/Encode/AAC
     stringa = f'ffmpeg -y -i "{path_file_video_origin}" ' + \
               f'-vf scale={size_width}:{size_height},setsar=1:1 ' + \
@@ -144,16 +144,74 @@ def split_mp4(largefile_path, recoil, output_folder_path, mb_limit=0):
     return list_filepath_output
 
 
+def timedelta_to_string(timestamp):
+
+    microsec = timedelta(microseconds=timestamp.microseconds)
+    timestamp = timestamp - microsec
+    hou, min_full = divmod(timestamp.seconds, 3600)
+    min, sec = divmod(min_full, 60)
+    str_microsec = int(microsec.microseconds/10000)
+    timestamp = '%02d:%02d:%02d.%02d' % (hou, min, sec, str_microsec)
+
+    return timestamp
+
+
+def float_seconds_to_string(float_sec):
+    """Convert seconds in float, to string in format hh:mm:ss
+
+    Args:
+        float_sec (float): Seconds
+
+    Returns:
+        String: Time in format hh:mm:ss
+    """
+
+    timedelta_seconds = timedelta(seconds=float_sec)
+
+    # format string: hh:mm:ss
+    string_timedelta = timedelta_to_string(timestamp=timedelta_seconds)
+    return string_timedelta
+
+
 def join_mp4(list_file_path, file_name_output):
+    """join a list of video path_file with mp4 extension
 
-    def exclude_temp_files():
+    Args:
+         list_file_path (list): list of path_file with mp4 extension
+         file_name_output (string): filename output
+    Returns:
+         list: list of dicts:
+                file_path_origin (string): file_path of original video,
+                duration_real (string): real video duration, format hh:mm:ss.
+    """
 
-        dir_ts = r'ts/*'
+    def exclude_temp_files(folder_script_path):
+
+        dir_ts = os.path.join(folder_script_path, 'ts', '*')
         r = glob.glob(dir_ts)
         for i in r:
             os.remove(i)
 
-    exclude_temp_files()
+    def get_duration(file_path):
+
+        result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                                 "format=duration", "-of",
+                                 "default=noprint_wrappers=1:nokey=1",
+                                 file_path],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT)
+        return float(result.stdout)
+
+    def get_dict_videos_duration(path_file_name_ts):
+
+        float_duration = get_duration(path_file_name_ts)
+        string_duration = \
+            float_seconds_to_string(float_duration)
+
+        dict_videos_duration = {}
+        dict_videos_duration['file_path_origin'] = file_path
+        dict_videos_duration['duration_real'] = string_duration
+        return dict_videos_duration
 
     # copy to .ts
     list_path_file_name_ts = []
@@ -161,6 +219,10 @@ def join_mp4(list_file_path, file_name_output):
 
     folder_script_path_relative = os.path.dirname(__file__)
     folder_script_path = os.path.realpath(folder_script_path_relative)
+    exclude_temp_files(folder_script_path)
+
+    list_dict_videos_duration = []
+
     for index, file_path in enumerate(list_file_path):
         logging.info(f'"{index+1}.ts" from "{file_path}"')
         file_name_ts = f'{index+1}.ts'
@@ -169,6 +231,11 @@ def join_mp4(list_file_path, file_name_output):
         os.system("ffmpeg -i " + '"' + file_path + '"' +
                   " -c copy -bsf:v h264_mp4toannexb -f mpegts " +
                   path_file_name_ts)
+
+        dict_videos_duration = \
+            get_dict_videos_duration(path_file_name_ts)
+        list_dict_videos_duration.append(dict_videos_duration)
+
         list_path_file_name_ts.append(path_file_name_ts)
 
     logging.info('\n')
@@ -181,15 +248,11 @@ def join_mp4(list_file_path, file_name_output):
             stringa += "|"
         else:
             stringa += "\" -c copy  -bsf:a aac_adtstoasc " + \
-                       f"{file_name_output}"
+                f"{file_name_output}"
 
     os.system(stringa)
-
-    for path_file_name_ts in list_path_file_name_ts:
-        os.remove(path_file_name_ts)
-
-    # test if commend bellow could replace command above
-    # exclude_temp_files()
+    exclude_temp_files(folder_script_path)
+    return list_dict_videos_duration
 
 
 def get_video_details(filepath):
@@ -224,8 +287,10 @@ def get_video_details(filepath):
             metadata['duration'] = re.search(
                 'Duration: (.*?),', l).group(0).split(':', 1)[1].strip(' ,')
             try:
-                metadata['bitrate'] = re.search(
-                    "bitrate: (\d+ kb/s)", l).group(0).split(':')[1].strip()
+                metadata['bitrate'] = \
+                    re.search(
+                        "bitrate: (\d+ kb/s)",
+                        l).group(0).split(':')[1].strip()
             except:
                 # .webm videos with encode Lavf56.40.101,
                 # may has 'Duration: N/A, start: -0.007000, bitrate: N/A'

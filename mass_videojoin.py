@@ -32,7 +32,6 @@ def logging_config():
     console.setFormatter(formatter)
     # add the handler to the root logger
     logging.getLogger('').addHandler(console)
-    logger = logging.getLogger(__name__)
 
 
 def clean_cmd():
@@ -43,11 +42,11 @@ def clean_cmd():
 
 def df_sort_human(df):
     """
-    Sort files and folders in human way. 
+    Sort files and folders in human way.
     So after folder/file '1' comes '2', instead of '10' and '11'.
     Simple yet flexible natural sorting in Python.
-    When you try to sort a list of strings that contain numbers, 
-    the normal python sort algorithm sorts lexicographically, 
+    When you try to sort a list of strings that contain numbers,
+    the normal python sort algorithm sorts lexicographically,
     so you might not get the results that you expect:
     More info: https://github.com/SethMMorton/natsort
 
@@ -87,15 +86,15 @@ def df_sort_human(df):
 
 def gen_report(path_dir):
 
-    # TODO input more file video extension:
-    # https://dotwhat.net/type/video-movie-files
+    # To input more file video extension:
+    #  https://dotwhat.net/type/video-movie-files
 
     tuple_video_extension = (".mp4", ".avi", ".webm", '.ts', '.vob',
                              '.mov', '.mkv', '.wmv')
     str_tuple_video_extension = ', '.join(tuple_video_extension)
     logging.info(f'Find for video with extension: {str_tuple_video_extension}')
     l = []
-    for root, dirs, files in os.walk(path_dir):
+    for root, _, files in os.walk(path_dir):
 
         for file in files:
             file_lower = file.lower()
@@ -104,8 +103,12 @@ def gen_report(path_dir):
 
                 path_file = os.path.join(root, file)
                 dict_inf = get_video_details(path_file)
-                (mode, ino, dev, nlink, uid,
-                 gid, size, atime, mtime, ctime) = os.stat(path_file)
+                # (mode, ino, dev, nlink, uid,
+                #  gid, size, atime, mtime, ctime) = os.stat(path_file)
+                stats_result = os.stat(path_file)
+                mtime = stats_result.st_mtime
+                ctime = stats_result.st_ctime
+
                 mtime = datetime.datetime.fromtimestamp(mtime)
 
                 d = {}
@@ -185,7 +188,7 @@ def get_list_chunk_videos_from_group(df, group_no, max_size_mb):
     list_chunk_videos = []
     chunk_size = 0
     list_videos = []
-    for index, row in df_group.iterrows():
+    for _, row in df_group.iterrows():
         if chunk_size + row['file_size'] > max_size_bytes:
             logging.info(f'join video from {len(list_videos)} files')
             list_chunk_videos.append(list_videos)
@@ -241,13 +244,76 @@ def get_path_folder_output_video():
     return path_folder_output_video
 
 
+def join_videos_process_df(df, list_file_path, file_name_output,
+                           list_dict_videos_duration):
+    """"update video_details dataframe with columns:
+         file_output, video_duration_real"
+
+    Args:
+        df (dataframe): video_details dataframe. Required columns:
+                    file_path
+        list_file_path (list): list of original video files
+        file_name_output (string): file_name of joined video output
+        list_dict_videos_duration (list): list of dicts, with keys:
+            file_path_origin (string). file_path of original video,
+            duration_real (string). real video duration, Format hh:mm:ss
+
+    Returns:
+        dataframe: dataframe updated with columns:
+                    file_output, video_duration_real
+    """
+
+    # add column file_output
+    mask_files_joined = df['file_path'].isin(list_file_path)
+    df.loc[mask_files_joined, 'file_output'] = file_name_output
+
+    # add column video_duration_real
+    for dict_videos_duration in list_dict_videos_duration:
+        file_path_origin = dict_videos_duration['file_path_origin']
+        string_video_duration_real = dict_videos_duration['duration_real']
+        mask_file = df['file_path'].isin([file_path_origin])
+        df.loc[mask_file, 'video_duration_real'] = \
+            string_video_duration_real
+
+    return df
+
+
+def join_videos_update_col_duration(df):
+    """rename columns durations of video_details dataframe.
+        from 'duration' to 'video_origin_duration_pre_join'},
+        from 'video_duration_real' to 'duration'
+
+    Args:
+        df (dataframe): video_details with columns:
+                            duration, video_duration_real
+
+    Returns:
+        dataframe: video_details with duration columns renamed
+    """
+
+    list_dict_replace = [{'duration': 'video_origin_duration_pre_join'},
+                         {'video_duration_real': 'duration'}]
+    for dict_ in list_dict_replace:
+        df = df.rename(columns=dict_)
+    return df
+
+
 def join_videos(df, max_size_mb, start_index_output):
+    """join videos according to column 'group_encode' in df dataframe
 
-    # path_folder_output = userpref_folderoutput()
+    Args:
+        df (dataframe): video_details dataframe. Required columns:
+                         file_dolder, file_name, group_encode
+        max_size_mb (int): max size of each block of videos joined
+        start_index_output (int): initial number that the exported video files
+                                   will receive as a suffix
+
+    Returns:
+        dataframe: video_details dataframe updated with new columns:
+                    [file_output, video_origin_duration_pre_join]
+    """
+
     path_folder_output = get_path_folder_output_video()
-
-    # default_filename_output = input('Enter a default name for the joined ' +\
-    # 'videos: ')
     default_filename_output = get_name_dir_origin()
 
     df['file_path'] = df['file_folder'] + '\\' + df['file_name']
@@ -258,14 +324,17 @@ def join_videos(df, max_size_mb, start_index_output):
         file_count = index + start_index_output
         file_name_output = f'{default_filename_output}-%03d.mp4' % file_count
         file_path_output = os.path.join(path_folder_output, file_name_output)
-        join_mp4(list_file_path, file_path_output)
+        list_dict_videos_duration = join_mp4(list_file_path, file_path_output)
 
-        # register file_output in dataframe
+        df = join_videos_process_df(df, list_file_path, file_name_output,
+                                    list_dict_videos_duration)
+
+        # register file_name_output in dataframe
         mask_files_joined = df['file_path'].isin(list_file_path)
         df.loc[mask_files_joined, 'file_output'] = file_name_output
 
+    df = join_videos_update_col_duration(df)
     print(f'total: {len(list_chunk_videos)} videos')
-
     return df
 
 
@@ -281,7 +350,7 @@ def make_reencode(path_file_report):
 
     def get_file_name_dest(file_folder_origin, file_name_origin):
         """
-        Create a hashed file name dest. 
+        Create a hashed file name dest.
         Template: reencode_{file_name_origin}_{hash}.mp4"
         """
         file_folder_origin_encode = file_folder_origin.encode('utf-8')
@@ -332,7 +401,7 @@ def make_reencode(path_file_report):
             video_resolution_to_change = dict_['video_resolution_to_change']
             size_width, size_height = \
                 video_resolution_to_change.split('x')
-        except Exception as e:
+        except:
             path_file_origin = os.path.join(dict_['file_folder_origin'],
                                             dict_['file_name_origin'])
             logging.error('Parse. Column video_resolution_to_change: ' +
@@ -450,9 +519,6 @@ def make_reencode(path_file_report):
 
     ask_for_delete_old_videos_encode(path_folder_encoded)
 
-    # TODO Test if all files mark as '1' in column reencode_done,
-    # TODO  are in folder videos_encoded
-
     # Ensure creation of column 'reencode_done'. Pseudobolean 1 or 0
     if 'reencode_done' not in df.columns:
         df['reencode_done'] = 0
@@ -522,18 +588,18 @@ def menu_ask():
 
         # eng
         msg_invalid_option = "Invalid option"
-        raise MyValidationError(msg_invalid_option)
+        raise msg_invalid_option
 
 
 def df_insert_row(row_number, df, row_value):
     """
-    A customized function to insert a row at any given position in the 
+    A customized function to insert a row at any given position in the
      dataframe.
     source: https://www.geeksforgeeks.org/insert-row-at-given-position-in-pandas-dataframe/
     :input: row_number: Int.
     :input: df: Dataframe.
     :input: row_value: Int.
-    :return: Dataframe. df_result | 
+    :return: Dataframe. df_result |
              Boolean. False. If the row_number was invalid.
     """
 
@@ -644,8 +710,10 @@ def search_to_split_videos(df, mb_limit):
     df = preprocess_df_split(df)
 
     recoil_sec = 10
-    # TODO estimate the recoil_mbsize by video bitrate
+
+    # TODO estimate the recoil_mbsize by video bitrate. Set 10 mb arbitrarily
     recoil_mbsize = 10
+
     size_limit = (mb_limit-recoil_mbsize) * 1024**2
     list_file_path_origin = get_list_file_path_origin(df=df,
                                                       size_limit=size_limit)
@@ -874,7 +942,9 @@ def set_group_column(path_file_report):
     df.to_excel(path_file_report, index=False)
     print(f"File '{path_file_report}' was updated with " +
           "group column to fast join\n")
-    # backup is not performed here as the grouping can be adjusted manually
+
+    # Note: backup is not performed here as the
+    #       grouping can be adjusted manually
 
 
 def set_split_videos(path_file_report, mb_limit):
@@ -967,7 +1037,8 @@ def main():
         print('\nIf necessary, change the reencode plan in the column ' +
               '"video_resolution_to_change"')
 
-        break_point = input('Type Enter to continue')
+        # break_point
+        input('Type Enter to continue')
         clean_cmd()
         main()
         return
@@ -977,8 +1048,9 @@ def main():
         # reencode videos mark in column video_resolution_to_change
         set_make_reencode(path_file_report)
 
-        break_point = input('Review the file and then type something to ' +
-                            'continue.')
+        # break_point
+        input('Review the file and then type something to ' +
+              'continue.')
         clean_cmd()
         main()
         return
@@ -995,10 +1067,10 @@ def main():
               'start the process that look for videos that ' +
               'are too big and should be splitted')
 
-        set_split_videos(path_file_report, mb_limit)
-
         # set start index output file
         start_index_output = get_start_index_output()
+
+        set_split_videos(path_file_report, mb_limit)
 
         # join all videos
         set_join_videos(path_file_report, mb_limit, start_index_output)
