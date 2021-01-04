@@ -85,6 +85,11 @@ def get_resolutions_where_ratio(resolution_ratio):
         ratio_standard = get_ratio_standard(width, height)
         if ratio_standard == resolution_ratio:
             list_transition_standard.append(transition_resolution)
+    if len(list_transition_standard) == 0:
+        raise Exception('Missing transition video ' +
+                        f'for ratio {resolution_ratio}.\n' +
+                        'Please save a transition video ' +
+                        'with this aspect ratio.')
     return list_transition_standard
 
 
@@ -152,6 +157,9 @@ def get_dict_transition_resolution():
     """
 
     list_transition_path_file = get_list_transition_path_file()
+    if len(list_transition_path_file) == 0:
+        raise Exception("There is no transition video archived " +
+                        "in the transition folder")
     dict_transition_resolutions = {}
     for transition_path_file in list_transition_path_file:
         resolutions = get_video_resolution_format(transition_path_file)
@@ -184,8 +192,11 @@ def check_transition_resolution(list_video_path_file):
     for video_resolution in set_video_resolutions:
         if video_resolution not in dict_transition_resolution_archived.keys():
             resolutions_missing.append(video_resolution)
-    logging.info(f'Generate transition to resolutions: {resolutions_missing}')
 
+    if len(resolutions_missing) == 0:
+        return
+
+    logging.info(f'Generate transition to resolutions: {resolutions_missing}')
     dict_path_file_transition_max_resiution = \
         get_dict_path_file_transition_max_resiution()
 
