@@ -11,6 +11,33 @@ import subprocess
 from datetime import timedelta
 
 
+def get_video_resolution(file_path):
+    """[summary]
+
+    Args:
+        file_path (str): absolute video path file
+
+    Returns:
+        dict: keys: height, width]
+    """
+
+    result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                             "stream=width,height", "-of",
+                             "default=noprint_wrappers=1:nokey=1",
+                             file_path],
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT)
+
+    result_stdout = str(result.stdout)
+    list_height_width = result_stdout.replace("b'", "").split(r'\r\n')
+    height = list_height_width[0]
+    width = list_height_width[1]
+    resolution = {}
+    resolution['height'] = height
+    resolution['width'] = width
+    return resolution
+
+
 def get_maxrate(size_height):
     """
     Maxrate equivalent to total bitrate 1000 kbps for 720p, with 128 kbps audio
@@ -173,6 +200,25 @@ def float_seconds_to_string(float_sec):
     return string_timedelta
 
 
+def get_duration(file_path):
+
+    result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                                "format=duration", "-of",
+                                "default=noprint_wrappers=1:nokey=1",
+                                file_path],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
+    stdout = result.stdout
+    result_stdout = stdout
+    if 'non-existing SPS' in str(stdout):
+        str_stdout = str(stdout)
+        logging.info('result_stdout are string: ' +
+                        f'{str_stdout} | {file_path}')
+        result_stdout = str_stdout.split(r'\r')[0]
+        result_stdout = result_stdout.replace("b'", "")
+    return float(result_stdout)
+
+
 def join_mp4(list_file_path, file_name_output):
     """join a list of video path_file with mp4 extension
 
@@ -182,7 +228,8 @@ def join_mp4(list_file_path, file_name_output):
     Returns:
          list: list of dicts:
                 file_path_origin (string): file_path of original video,
-                duration_real (string): real video duration, format hh:mm:ss.
+                duration_real (string): real video duration,
+                                        format="hh:mm:ss.ms"
     """
 
     def exclude_temp_files(folder_script_path):
@@ -192,15 +239,7 @@ def join_mp4(list_file_path, file_name_output):
         for i in r:
             os.remove(i)
 
-    def get_duration(file_path):
 
-        result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
-                                 "format=duration", "-of",
-                                 "default=noprint_wrappers=1:nokey=1",
-                                 file_path],
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT)
-        return float(result.stdout)
 
     def get_dict_videos_duration(path_file_name_ts):
 

@@ -10,13 +10,16 @@ import pandas as pd
 import datetime
 import logging
 from video_tools import change_width_height_mp4, get_video_details, \
-    join_mp4, split_mp4
+    join_mp4, split_mp4, get_duration, timedelta_to_string
 from config_handler import handle_config_file
 import unidecode
 import natsort
 import glob
 import sys
 import hashlib
+from transition import check_transition_resolution, \
+                       get_video_resolution_format, \
+                       get_dict_transition_resolution
 
 
 def logging_config():
@@ -245,7 +248,8 @@ def get_path_folder_output_video():
 
 
 def join_videos_process_df(df, list_file_path, file_name_output,
-                           list_dict_videos_duration):
+                           list_dict_videos_duration,
+                           transition_effect=False):
     """"update video_details dataframe with columns:
          file_output, video_duration_real"
 
@@ -254,9 +258,12 @@ def join_videos_process_df(df, list_file_path, file_name_output,
                     file_path
         list_file_path (list): list of original video files
         file_name_output (string): file_name of joined video output
-        list_dict_videos_duration (list): list of dicts, with keys:
-            file_path_origin (string). file_path of original video,
-            duration_real (string). real video duration, Format hh:mm:ss
+        list_dict_videos_duration (list):
+            list of dicts, with keys:
+                file_path_origin (string). file_path of original video,
+                duration_real (string). real video duration, Format hh:mm:ss
+        transition_effect {bol}: True if list_file_path contain
+                                 transition effects
 
     Returns:
         dataframe: dataframe updated with columns:
@@ -268,12 +275,31 @@ def join_videos_process_df(df, list_file_path, file_name_output,
     df.loc[mask_files_joined, 'file_output'] = file_name_output
 
     # add column video_duration_real
+    index_video_in_df = 0
+    if transition_effect:
+        transition_duration_str = list_dict_videos_duration[0]['duration_real']
+        # convert to timedelta
+        transition_duration = \
+            strptimedelta_hh_mm_ss_ms(str_hh_mm_ss_ms=transition_duration_str)
+    else:
+        transition_duration = strptimedelta_hh_mm_ss_ms(str_hh_mm_ss_ms='00:00:00')
+
     for dict_videos_duration in list_dict_videos_duration:
         file_path_origin = dict_videos_duration['file_path_origin']
-        string_video_duration_real = dict_videos_duration['duration_real']
+
         mask_file = df['file_path'].isin([file_path_origin])
-        df.loc[mask_file, 'video_duration_real'] = \
-            string_video_duration_real
+        # if video_path is in dataframe, instead of being a transition video
+        if mask_file.any():
+            dict_videos_duration = \
+                update_dict_videos_duration(dict_videos_duration,
+                                            index_video_in_df,
+                                            transition_duration)
+
+            index_video_in_df += 1
+            string_video_duration_real = dict_videos_duration['duration_real']
+
+            df.loc[mask_file, 'video_duration_real'] = \
+                string_video_duration_real
 
     return df
 
@@ -298,7 +324,63 @@ def join_videos_update_col_duration(df):
     return df
 
 
-def join_videos(df, max_size_mb, start_index_output):
+def transition_update_chunk_videos(list_chunk_videos):
+    """includes transition effect in the video join plan
+
+    Args:
+        list_chunk_videos (list): list of groups.
+                                  Each group is a list of video path_files
+    """
+
+    def get_transition_path_file(video_path_file):
+
+        video_resolution = get_video_resolution_format(video_path_file)
+        dict_transition_resolution = get_dict_transition_resolution()
+        transition_path_file = dict_transition_resolution[video_resolution]
+        return transition_path_file
+
+    list_chunk_videos_update = []
+    for chunk_videos in list_chunk_videos:
+        # find transition_path_file based on the resolution of first video_path
+        video_path_file = chunk_videos[0]
+        transition_path_file = get_transition_path_file(video_path_file)
+
+        for index, video_path in enumerate(chunk_videos):
+            if index == 0:
+                chunk_videos_update = []
+                chunk_videos_update.append(transition_path_file)
+            chunk_videos_update.append(video_path)
+            chunk_videos_update.append(transition_path_file)
+        list_chunk_videos_update.append(chunk_videos_update)
+    return list_chunk_videos_update
+
+
+def strptimedelta_hh_mm_ss_ms(str_hh_mm_ss_ms):
+
+    hr, min, sec = map(float, str_hh_mm_ss_ms.split(':'))
+    duration_timedelta = datetime.timedelta(hours=hr, minutes=min, seconds=sec)
+    return duration_timedelta
+
+
+def ensure_transitions(list_chunk_videos):
+    """ensures that there is an appropriate transition, based on resolution,
+        for each chunk_videos
+
+    Args:
+        list_chunk_videos (list): list of chunk_videos.
+                                  Chunk_videos are list of video path_file
+    """
+
+    list_path_file_chunk_representatives = []
+    for chunk_videos in list_chunk_videos:
+        first_path_file = chunk_videos[0]
+        list_path_file_chunk_representatives.append(first_path_file)
+
+    check_transition_resolution(list_path_file_chunk_representatives)
+
+
+def join_videos(df, max_size_mb, start_index_output,
+                transition_status=False):
     """join videos according to column 'group_encode' in df dataframe
 
     Args:
@@ -307,6 +389,7 @@ def join_videos(df, max_size_mb, start_index_output):
         max_size_mb (int): max size of each block of videos joined
         start_index_output (int): initial number that the exported video files
                                    will receive as a suffix
+        transition_status (bol): true to activate transition effect
 
     Returns:
         dataframe: video_details dataframe updated with new columns:
@@ -318,16 +401,33 @@ def join_videos(df, max_size_mb, start_index_output):
 
     df['file_path'] = df['file_folder'] + '\\' + df['file_name']
     list_chunk_videos = get_list_chunk_videos(df, max_size_mb)
+
+    # break point
+    input('Press a key to continue...')
+
     df['file_output'] = ''
+
+    list_chunk_videos_original = list_chunk_videos.copy()
+    # make list_chunk_videos with transition effect
+    if transition_status:
+        ensure_transitions(list_chunk_videos)
+        # include transition_video between each file in list_chunk_videos
+        list_chunk_videos = \
+            transition_update_chunk_videos(list_chunk_videos)
 
     for index, list_file_path in enumerate(list_chunk_videos):
         file_count = index + start_index_output
         file_name_output = f'{default_filename_output}-%03d.mp4' % file_count
         file_path_output = os.path.join(path_folder_output, file_name_output)
+
+        # make video join
         list_dict_videos_duration = join_mp4(list_file_path, file_path_output)
 
-        df = join_videos_process_df(df, list_file_path, file_name_output,
-                                    list_dict_videos_duration)
+        list_file_path_original = list_chunk_videos_original[index]
+        df = join_videos_process_df(df, list_file_path_original,
+                                    file_name_output,
+                                    list_dict_videos_duration,
+                                    transition_status)
 
         # register file_name_output in dataframe
         mask_files_joined = df['file_path'].isin(list_file_path)
@@ -336,6 +436,41 @@ def join_videos(df, max_size_mb, start_index_output):
     df = join_videos_update_col_duration(df)
     print(f'total: {len(list_chunk_videos)} videos')
     return df
+
+
+def update_dict_videos_duration(dict_videos_duration, index,
+                                transition_duration):
+    """update video_duration key in dict, with duration if transition effects
+
+    Args:
+        dict_videos_duration (dict): required key 'duration_real'
+        index (int): index position in group videos
+        transition_duration (timedelta): video transition duration
+
+    Returns:
+        dict: dict_videos_duration updated
+    """
+
+    if index == 0:
+        plus_timedelta = transition_duration + transition_duration
+    else:
+        plus_timedelta = transition_duration
+
+    duration_pre_transition = \
+        dict_videos_duration['duration_real']
+
+    duration_pre_transition_timedelta = \
+        strptimedelta_hh_mm_ss_ms(
+            str_hh_mm_ss_ms=duration_pre_transition)
+
+    duration_pos_transition_timedelta = \
+        duration_pre_transition_timedelta + \
+        plus_timedelta
+
+    duration_pos_transition_str = \
+        timedelta_to_string(duration_pos_transition_timedelta)
+    dict_videos_duration['duration_real'] = duration_pos_transition_str
+    return dict_videos_duration
 
 
 def exclude_all_files_from_folder(path_folder):
@@ -711,7 +846,7 @@ def search_to_split_videos(df, mb_limit):
 
     recoil_sec = 10
 
-    # TODO estimate the recoil_mbsize by video bitrate. Set 10 mb arbitrarily
+    # TODO: estimate the recoil_mbsize by video bitrate. Set 10 mb arbitrarily
     recoil_mbsize = 10
 
     size_limit = (mb_limit-recoil_mbsize) * 1024**2
@@ -780,6 +915,22 @@ def userpref_size_per_file_mb():
     return value_got
 
 
+def get_transition_effect_status():
+
+    folder_script_path = get_folder_script_path()
+    path_file = os.path.join(folder_script_path, 'config', 'config.txt')
+    variable_name = 'activate_transition'
+    variable_value = \
+        handle_config_file(path_file, variable_name,
+                           set_value=None, parse=True)
+    transition_effect_status = variable_value['activate_transition'][0]
+    if transition_effect_status == 'true':
+        transition_effect_status = True
+    else:
+        transition_effect_status = False
+    return transition_effect_status
+
+
 def ensure_folder_existence(folders_path):
     """
     :input: folders_path: List
@@ -846,7 +997,7 @@ def get_folder_name_normalized(path_dir):
 
 def prefill_video_resolution_to_change(df):
 
-    # TODO identify the main main profile that has 'audiocodec aac' and
+    # identify the main main profile that has 'audiocodec aac' and
     #  'videocodec libx264'
 
     df['key_join_checker'] = df['audio_codec'] + '-' + \
@@ -967,7 +1118,10 @@ def set_split_videos(path_file_report, mb_limit):
 def set_join_videos(path_file_report, mb_limit, start_index_output):
 
     df = pd.read_excel(path_file_report, engine='openpyxl')
-    df = join_videos(df, mb_limit, start_index_output)
+
+    # set in config/config.txt if transition_effect are true or false
+    transition_status = get_transition_effect_status()
+    df = join_videos(df, mb_limit, start_index_output, transition_status)
     df.to_excel(path_file_report, index=False)
 
     # backup joined
