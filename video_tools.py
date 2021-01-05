@@ -102,7 +102,8 @@ def change_height_width_mp4(path_file_video_origin, size_height,
     logging.info('Done')
 
 
-def split_mp4(largefile_path, recoil, output_folder_path, mb_limit=0):
+def split_mp4(largefile_path, recoil, output_folder_path, mb_limit=0,
+              original_video_duration_sec=0):
     """
     Split video without reencode
     :input: recoil: Int. Seconds add to initial 'part 2' to prevent lost frames
@@ -133,10 +134,12 @@ def split_mp4(largefile_path, recoil, output_folder_path, mb_limit=0):
     file_name = os.path.split(largefile_path)[1]
     file_name_without_extension = os.path.splitext(file_name)[0]
     file_size = os.stat(largefile_path).st_size
-    limit_size = mb_limit * 1024**2
-    slices_qt = file_size//limit_size + 1
-    original_video_duration_sec = get_length(largefile_path)
-    video_duration_sec = original_video_duration_sec + ((slices_qt)*recoil)
+    limit_size = mb_limit * 1024 ** 2
+    slices_qt = file_size // limit_size + 1
+
+    if original_video_duration_sec == 0:
+        original_video_duration_sec = get_length(largefile_path)
+    video_duration_sec = original_video_duration_sec + ((slices_qt-1)*recoil)
     duration_per_split_sec = int(video_duration_sec/slices_qt)
 
     list_filepath_output = []
@@ -200,6 +203,22 @@ def float_seconds_to_string(float_sec):
     return string_timedelta
 
 
+def float_seconds_from_string(str_hh_mm_ss_ms):
+    """Convert to seconds in float, from string in format hh:mm:ss
+
+    Args:
+        string_timedelta (str): format hh:mm:ss.ms
+
+    Returns:
+        Float: timedelta in seconds
+    """
+
+    hr, min, sec = map(float, str_hh_mm_ss_ms.split(':'))
+    float_sec_timedelta = sec + min*60 + hr*60*60
+
+    return float_sec_timedelta
+
+
 def get_duration(file_path):
 
     result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
@@ -238,8 +257,6 @@ def join_mp4(list_file_path, file_name_output):
         r = glob.glob(dir_ts)
         for i in r:
             os.remove(i)
-
-
 
     def get_dict_videos_duration(path_file_name_ts):
 

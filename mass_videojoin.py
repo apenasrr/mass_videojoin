@@ -10,7 +10,8 @@ import pandas as pd
 import datetime
 import logging
 from video_tools import change_width_height_mp4, get_video_details, \
-    join_mp4, split_mp4, get_duration, timedelta_to_string
+    join_mp4, split_mp4, get_duration, timedelta_to_string, \
+    float_seconds_to_string, float_seconds_from_string
 from config_handler import handle_config_file
 import unidecode
 import natsort
@@ -60,7 +61,6 @@ def df_sort_human(df):
     def sort_human(list_):
 
         list_ = natsort.natsorted(list_)
-
         return list_
 
     def sort_df_column_from_list(df, column_name, sorter):
@@ -75,7 +75,6 @@ def df_sort_human(df):
         df['order'] = df[column_name].map(sorterIndex)
         df.sort_values(['order'], ascending=[True], inplace=True)
         df.drop(['order', column_name], 1, inplace=True)
-
         return df
 
     column_name = 'path_file'
@@ -83,7 +82,6 @@ def df_sort_human(df):
     list_path_file = df[column_name].tolist()
     sorter = sort_human(list_path_file)
     df = sort_df_column_from_list(df, column_name, sorter)
-
     return df
 
 
@@ -156,7 +154,6 @@ def gen_report(path_dir):
             else:
                 logging.info(f'Unselected file: {file}')
     df = pd.DataFrame(l)
-
     return df
 
 
@@ -175,11 +172,11 @@ def get_video_details_with_group(df):
                 df.loc[index, 'group_encode'] = group_encode_value_prev + 1
             else:
                 df.loc[index, 'group_encode'] = group_encode_value_prev
-
     return df
 
 
-def get_list_chunk_videos_from_group(df, group_no, max_size_mb):
+def get_list_chunk_videos_from_group(df, group_no, max_size_mb,
+                                     duration_limit='00:00:00.00'):
 
     max_size_bytes = max_size_mb * 1024**2
     mask = df['group_encode'].isin([group_no])
@@ -188,19 +185,41 @@ def get_list_chunk_videos_from_group(df, group_no, max_size_mb):
         df['file_name']
 
     df_group = df.loc[mask, :]
+    df_group['float_duration'] = \
+        df_group['duration'].apply(float_seconds_from_string)
+
+    if duration_limit != '00:00:00.00':
+        float_duration_limit = float_seconds_from_string(duration_limit)
+    else:
+        # symbolic limit not attainable
+        float_duration_limit = float_seconds_from_string('99:99:99')
+
     list_chunk_videos = []
     chunk_size = 0
+    chunk_duration = 0
     list_videos = []
     for _, row in df_group.iterrows():
-        if chunk_size + row['file_size'] > max_size_bytes:
+        chunk_size_after = chunk_size + row['file_size']
+        chunk_duration_after = chunk_duration + row['float_duration']
+
+        if (chunk_size_after > max_size_bytes) or \
+           (chunk_duration_after > float_duration_limit):
+
             logging.info(f'join video from {len(list_videos)} files')
+            if len(list_videos) == 0:
+                logging.error('There is a video bigger than limit, ' +
+                              'after split process.')
+                logging.error(row)
+                sys.exit()
             list_chunk_videos.append(list_videos)
 
             list_videos = []
             chunk_size = 0
+            chunk_duration = 0
 
         list_videos.append(row['file_path'])
         chunk_size += row['file_size']
+        chunk_duration += row['float_duration']
 
     if len(list_videos) > 0:
         logging.info(f'join video from {len(list_videos)} files')
@@ -212,18 +231,18 @@ def get_list_chunk_videos_from_group(df, group_no, max_size_mb):
     return list_chunk_videos
 
 
-def get_list_chunk_videos(df, max_size_mb):
+def get_list_chunk_videos(df, max_size_mb, duration_limit='00:00:00.00'):
 
     list_group = df['group_encode'].unique().tolist()
     list_final = []
 
     for group_no in list_group:
         group_no = str(group_no)
-        list_chunk_videos = get_list_chunk_videos_from_group(df, group_no,
-                                                             max_size_mb)
+        list_chunk_videos = \
+            get_list_chunk_videos_from_group(df, group_no,
+                                             max_size_mb, duration_limit)
         list_final += list_chunk_videos
         print('')
-
     return list_final
 
 
@@ -231,7 +250,6 @@ def get_name_dir_origin():
 
     name_file_folder_name = get_txt_folder_origin()
     dir_name_saved = get_txt_content(name_file_folder_name)
-
     return dir_name_saved
 
 
@@ -243,7 +261,6 @@ def get_path_folder_output_video():
 
     path_folder_output_video = os.path.join(folder_name, 'output_videos')
     ensure_folder_existence([path_folder_output_video])
-
     return path_folder_output_video
 
 
@@ -282,7 +299,8 @@ def join_videos_process_df(df, list_file_path, file_name_output,
         transition_duration = \
             strptimedelta_hh_mm_ss_ms(str_hh_mm_ss_ms=transition_duration_str)
     else:
-        transition_duration = strptimedelta_hh_mm_ss_ms(str_hh_mm_ss_ms='00:00:00')
+        transition_duration = \
+            strptimedelta_hh_mm_ss_ms(str_hh_mm_ss_ms='00:00:00')
 
     for dict_videos_duration in list_dict_videos_duration:
         file_path_origin = dict_videos_duration['file_path_origin']
@@ -300,7 +318,6 @@ def join_videos_process_df(df, list_file_path, file_name_output,
 
             df.loc[mask_file, 'video_duration_real'] = \
                 string_video_duration_real
-
     return df
 
 
@@ -355,6 +372,27 @@ def transition_update_chunk_videos(list_chunk_videos):
     return list_chunk_videos_update
 
 
+def time_is_hh_mm_ss_ms(str_hh_mm_ss_ms):
+    """test if time value is format hh:mm:ss.ms
+
+    Args:
+        str_hh_mm_ss_ms (str): time value
+
+    Raises:
+        Exception: incorrrect format
+
+    Returns:
+        bol: True if valid
+    """
+
+    try:
+        hr, min, sec = map(float, str_hh_mm_ss_ms.split(':'))
+        return True
+    except:
+        raise Exception(f'The time value "{str_hh_mm_ss_ms} "' +
+                        'need to be in format: hh:mm:ss.ms')
+
+
 def strptimedelta_hh_mm_ss_ms(str_hh_mm_ss_ms):
 
     hr, min, sec = map(float, str_hh_mm_ss_ms.split(':'))
@@ -380,7 +418,7 @@ def ensure_transitions(list_chunk_videos):
 
 
 def join_videos(df, max_size_mb, start_index_output,
-                transition_status=False):
+                duration_limit='00:00:00.00', transition_status=False):
     """join videos according to column 'group_encode' in df dataframe
 
     Args:
@@ -389,6 +427,7 @@ def join_videos(df, max_size_mb, start_index_output,
         max_size_mb (int): max size of each block of videos joined
         start_index_output (int): initial number that the exported video files
                                    will receive as a suffix
+        duration_limit (str): duration limit in format: hh:mm:ss.ms
         transition_status (bol): true to activate transition effect
 
     Returns:
@@ -400,7 +439,7 @@ def join_videos(df, max_size_mb, start_index_output,
     default_filename_output = get_name_dir_origin()
 
     df['file_path'] = df['file_folder'] + '\\' + df['file_name']
-    list_chunk_videos = get_list_chunk_videos(df, max_size_mb)
+    list_chunk_videos = get_list_chunk_videos(df, max_size_mb, duration_limit)
 
     # break point
     input('Press a key to continue...')
@@ -564,7 +603,7 @@ def make_reencode(path_file_report):
 
     def ask_for_delete_old_videos_encode(path_folder_encoded):
 
-        for root, dirs, files in os.walk(path_folder_encoded):
+        for _, _, files in os.walk(path_folder_encoded):
 
             list_file_name_encoded = list(files)
 
@@ -684,8 +723,58 @@ def make_reencode(path_file_report):
         df.to_excel(path_file_report, index=False)
         create_report_backup(df=df, path_file_report=path_file_report,
                              tag='reencode')
+    return df
 
-    # sys.exit()
+
+def correct_duration(path_file_report):
+    """Corrects the duration metadata in the project report
+
+    Args:
+        path_file_report (str): absolute report path file.
+            Required columns in report: ['file_folder', 'file_name']
+
+    Returns:
+        dataframe: updated with:
+            -corrected duration column
+            -new column duration_original
+    """
+
+    logging.info('Correcting duration metadata...')
+
+    # ensure folder ts in project folder
+    project_dir_path = os.path.dirname(path_file_report)
+    project_ts_dir_path = os.path.join(project_dir_path, 'ts')
+    ensure_folder_existence([project_ts_dir_path])
+
+    # load report project
+    df = pd.read_excel(path_file_report, engine='openpyxl')
+
+    # create backup column
+    df['duration_original'] = df['duration']
+
+    # iterate through video files
+    series_file_path = df['file_folder'] + '\\' + df['file_name']
+    list_file_path = series_file_path.tolist()
+    for index, file_path in enumerate(list_file_path):
+
+        # convert file
+        file_name_ts = f'{index+1}.ts'
+        path_file_name_ts = os.path.join(
+            project_ts_dir_path, file_name_ts)
+        os.system("ffmpeg -i " + '"' + file_path + '"' +
+                  " -c copy -bsf:v h264_mp4toannexb -f mpegts " +
+                  path_file_name_ts)
+
+        # get duration
+        float_duration = get_duration(path_file_name_ts)
+        string_duration = \
+            float_seconds_to_string(float_duration)
+
+        # include in report file
+        df.loc[index, 'duration'] = string_duration
+
+        # remove temp file
+        exclude_all_files_from_folder(path_folder=project_ts_dir_path)
     return df
 
 
@@ -761,7 +850,22 @@ def df_insert_row(row_number, df, row_value):
     return df_result
 
 
-def search_to_split_videos(df, mb_limit):
+def search_to_split_videos(df, mb_limit, duration_limit='00:00:00.00'):
+    """Searches for videos larger than a certain limit and split them in
+       folder 'videos_splitted'.
+
+    Args:
+        df (dataframe): video_details.xlsx. Required columns:
+                        [file_folder, file_name, file_size]
+        mb_limit (int): Video size limit  in megabytes
+        duration_limit (str, optional): Video duration limit.
+                                        Format hh:mm:ss.ms.
+                                        Defaults to '00:00:00.00'.
+    Returns:
+        (dataframe): dataframe updated with new columns:
+                     [file_path, split_file_folder_origin,
+                      split_file_name_origin, split_file_size_origin]
+    """
 
     def preprocess_df_split(df):
 
@@ -769,7 +873,6 @@ def search_to_split_videos(df, mb_limit):
         df['split_file_folder_origin'] = ''
         df['split_file_name_origin'] = ''
         df['split_file_size_origin'] = ''
-
         return df
 
     def get_dict_row_dest(dict_row_origin, pathfile_output):
@@ -788,6 +891,9 @@ def search_to_split_videos(df, mb_limit):
         dict_row_dest['file_name'] = file_name_dest
         dict_row_dest['file_size'] = file_size_dest
 
+        float_duration = get_duration(pathfile_output)
+        str_duration = float_seconds_to_string(float_duration)
+        dict_row_dest['duration'] = str_duration
         return dict_row_dest
 
     def get_row_number_from_filepath(df, file_path_origin):
@@ -801,7 +907,6 @@ def search_to_split_videos(df, mb_limit):
 
         df_row_origin = df.loc[mask_file, :]
         row_number = df_row_origin.index.values[0]
-
         return row_number
 
     def delete_fileorigin(df, file_path_origin):
@@ -831,16 +936,107 @@ def search_to_split_videos(df, mb_limit):
 
         # delete the file origin row
         df = delete_fileorigin(df=df, file_path_origin=file_path_origin)
-
         return df
 
-    def get_list_file_path_origin(df, size_limit):
+    def get_mask_duration_longer_than(serie_str_duration, str_duration_limit):
+        """
 
-        mask_to_be_split = df['file_size'] > size_limit
-        df_to_be_split = df.loc[mask_to_be_split, :]
-        list_file_path_origin = df_to_be_split.loc[:, 'file_path'].tolist()
+        Args:
+            serie_str_duration (series): string duration series in format:
+                                        hh:mm:ss.ms
+            str_duration_limit ([type]): string duration in format: hh:mm:ss.ms
 
-        return list_file_path_origin
+        Returns:
+            series: boolean mask series. True = longer than limit.
+        """
+
+        serie_timedelta_duration = pd.to_timedelta(serie_str_duration)
+        timedelta_duration_limit = pd.to_timedelta(str_duration_limit)
+        mask_duration_limit = \
+            serie_timedelta_duration > timedelta_duration_limit
+        return mask_duration_limit
+
+    def get_mask_to_be_split(df, size_limit,
+                             duration_limit='00:00:00.00'):
+
+        """[summary]
+
+        Returns:
+            (series bol): mask to df indicate which rows
+                            need to be split
+
+        """
+
+        mask_size = df['file_size'] > size_limit
+
+        if duration_limit != '00:00:00.00':
+            serie_str_duration = df['duration']
+            mask_duration = \
+                get_mask_duration_longer_than(
+                    serie_str_duration=serie_str_duration,
+                    str_duration_limit=duration_limit)
+            mask_to_be_split = mask_size | mask_duration
+        else:
+            mask_to_be_split = mask_size
+        return mask_to_be_split
+
+    def get_list_dict_path_file_mb_limit(df, size_limit,
+                                         duration_limit='00:00:00.00'):
+        """get list of the files to be splited and
+        their maximum split size in megabyte
+
+        Args:
+            df (dataframe): [description]
+            size_limit (int): limite size in bytes
+            duration_limit (str): duration limit in format: hh:mm:ss.ms
+
+        Returns:
+            list: list of dict. keys: [path_file, mb_limit]
+        """
+
+        mask_to_be_split = get_mask_to_be_split(df, size_limit,
+                                                duration_limit)
+
+        df_to_split = df.loc[mask_to_be_split,
+                            ['file_folder', 'file_name', 'duration',
+                             'file_size']]
+        df_to_split['file_path'] = df['file_folder'] + '\\' + df['file_name']
+
+        if duration_limit != '00:00:00.00':
+            # col proportion_duration_limit: divide video duration
+            #                                by the duration limit.
+            df_to_split['timedelta_duration'] = \
+                pd.to_timedelta(df_to_split['duration'])
+            timedelta_duration_limit = pd.to_timedelta(duration_limit)
+            df_to_split['proportion_duration_limit'] = \
+                df_to_split['timedelta_duration'] / timedelta_duration_limit
+
+            # col size_limit_by_duration
+            df_to_split['size_limit_by_duration'] = \
+                df_to_split['file_size'] // \
+                    df_to_split['proportion_duration_limit']
+
+            # col size_split: lowest value between
+            #                 size_limit_by_duration and size_limit
+            df_to_split['size_limit'] = size_limit
+            df_to_split['size_split'] = df_to_split[['size_limit_by_duration',
+                                                    'size_limit']].min(axis=1)
+
+            # col mb_limit: convert size_split from bytes to mb
+            df_to_split['mb_limit'] = df_to_split['size_split'] // (1024 ** 2)
+        else:
+            df_to_split['mb_limit'] = df_to_split['size_limit'] // (1024 ** 2)
+
+        list_dict = []
+        for _, row in df_to_split.iterrows():
+            dict_ = {}
+            dict_['file_path'] = row['file_path']
+            dict_['mb_limit'] = int(row['mb_limit'])
+            str_duration = row['duration']
+            dict_['float_duration_sec'] = \
+                float_seconds_from_string(str_duration)
+            list_dict.append(dict_)
+        return list_dict
 
     df = preprocess_df_split(df)
 
@@ -848,23 +1044,34 @@ def search_to_split_videos(df, mb_limit):
 
     # TODO: estimate the recoil_mbsize by video bitrate. Set 10 mb arbitrarily
     recoil_mbsize = 10
+    size_limit = (mb_limit - recoil_mbsize) * 1024 ** 2
 
-    size_limit = (mb_limit-recoil_mbsize) * 1024**2
-    list_file_path_origin = get_list_file_path_origin(df=df,
-                                                      size_limit=size_limit)
+    if duration_limit != '00:00:00.00':
+        # ensure duration_limit is valid or raise error
+        time_is_hh_mm_ss_ms(str_hh_mm_ss_ms=duration_limit)
+
+    list_dict_path_file_mb_limit = \
+        get_list_dict_path_file_mb_limit(df=df,
+                                         size_limit=size_limit,
+                                         duration_limit=duration_limit)
+
     folder_script_path = get_folder_script_path()
     output_folder_path = os.path.join(folder_script_path, 'videos_splitted')
     exclude_all_files_from_folder(output_folder_path)
 
-    for file_path_origin in list_file_path_origin:
-        list_filepath_output = split_mp4(largefile_path=file_path_origin,
-                                         recoil=recoil_sec,
-                                         mb_limit=mb_limit,
-                                         output_folder_path=output_folder_path)
+    for dict_path_file_mb_limit in list_dict_path_file_mb_limit:
+        file_path = dict_path_file_mb_limit['file_path']
+        mb_limit = dict_path_file_mb_limit['mb_limit']
+        float_duration_sec = dict_path_file_mb_limit['float_duration_sec']
+        list_filepath_output = \
+            split_mp4(largefile_path=file_path,
+                      recoil=recoil_sec,
+                      mb_limit=mb_limit,
+                      output_folder_path=output_folder_path,
+                      original_video_duration_sec=float_duration_sec)
 
-        df = update_df_files(df=df, file_path_origin=file_path_origin,
+        df = update_df_files(df=df, file_path_origin=file_path,
                              list_filepath_output=list_filepath_output)
-
     return df
 
 
@@ -885,7 +1092,6 @@ def userpref_folderoutput():
         path_folder_output = input('Inform the folder path output: ')
         handle_config_file(path_file, variable_name,
                            set_value=path_folder_output, parse=False)
-
     return path_folder_output
 
 
@@ -911,7 +1117,6 @@ def userpref_size_per_file_mb():
         value_got = input(question)
         handle_config_file(path_file, variable_name,
                            set_value=value_got, parse=False)
-
     return value_got
 
 
@@ -929,6 +1134,20 @@ def get_transition_effect_status():
     else:
         transition_effect_status = False
     return transition_effect_status
+
+
+def get_duration_limit():
+
+    folder_script_path = get_folder_script_path()
+    path_file = os.path.join(folder_script_path, 'config', 'config.txt')
+    variable_name = 'duration_limit'
+    variable_value = \
+        handle_config_file(path_file, variable_name,
+                           set_value=None, parse=True)
+    duration_limit = variable_value[variable_name][0]
+    # ensure duration_limit is valid or raise error
+    time_is_hh_mm_ss_ms(str_hh_mm_ss_ms=duration_limit)
+    return duration_limit
 
 
 def ensure_folder_existence(folders_path):
@@ -963,7 +1182,6 @@ def get_txt_content(file_path):
     file_content = file.readlines()
     file_content = ''.join(file_content)
     file.close()
-
     return file_content
 
 
@@ -986,12 +1204,10 @@ def get_folder_name_normalized(path_dir):
         string_new = string_new.replace(' ', '_')
         string_new = string_new.replace('___', '_')
         string_new = string_new.replace('__', '_')
-
         return string_new
 
     dir_name = os.path.basename(path_dir)
     dir_name_normalize = normalize_string_to_link(dir_name)
-
     return dir_name_normalize
 
 
@@ -1039,7 +1255,6 @@ def prefill_video_resolution_to_change(df):
     df.loc[mask_resolution_to_change,
            'video_resolution_to_change'] = video_resolution_main
     df.drop('key_join_checker', axis=1, inplace=True)
-
     return df
 
 
@@ -1084,6 +1299,18 @@ def set_make_reencode(path_file_report):
     print('\nReencode finished')
 
 
+def set_correct_duration(path_file_report):
+
+    df = correct_duration(path_file_report)
+
+    df.to_excel(path_file_report, index=False)
+
+    # make backup
+    create_report_backup(
+        df=df, path_file_report=path_file_report, tag='correct_duration')
+    print('\nCorrected Duration column')
+
+
 def set_group_column(path_file_report):
 
     # update video_details with groups
@@ -1098,7 +1325,7 @@ def set_group_column(path_file_report):
     #       grouping can be adjusted manually
 
 
-def set_split_videos(path_file_report, mb_limit):
+def set_split_videos(path_file_report, mb_limit, duration_limit='00:00:00,00'):
 
     df = pd.read_excel(path_file_report, engine='openpyxl')
 
@@ -1107,7 +1334,8 @@ def set_split_videos(path_file_report, mb_limit):
         df=df, path_file_report=path_file_report, tag='grouped')
 
     # Find for file_video too big and split them
-    df = search_to_split_videos(df, mb_limit=mb_limit)
+    df = search_to_split_videos(df, mb_limit=mb_limit,
+                                duration_limit=duration_limit)
 
     df.to_excel(path_file_report, index=False)
 
@@ -1115,13 +1343,15 @@ def set_split_videos(path_file_report, mb_limit):
         df=df, path_file_report=path_file_report, tag='splited')
 
 
-def set_join_videos(path_file_report, mb_limit, start_index_output):
+def set_join_videos(path_file_report, mb_limit, duration_limit='00:00:00,00',
+                    start_index_output=1):
 
     df = pd.read_excel(path_file_report, engine='openpyxl')
 
     # set in config/config.txt if transition_effect are true or false
     transition_status = get_transition_effect_status()
-    df = join_videos(df, mb_limit, start_index_output, transition_status)
+    df = join_videos(df, mb_limit, start_index_output,
+                     duration_limit, transition_status)
     df.to_excel(path_file_report, index=False)
 
     # backup joined
@@ -1133,7 +1363,6 @@ def get_folder_script_path():
 
     folder_script_path_relative = os.path.dirname(__file__)
     folder_script_path = os.path.realpath(folder_script_path_relative)
-
     return folder_script_path
 
 
@@ -1143,14 +1372,12 @@ def set_path_file_report():
     ensure_folder_existence([folder_path_output_relative])
     path_file_report = os.path.join(folder_path_output_relative,
                                     'video_details.xlsx')
-
     return path_file_report
 
 
 def get_txt_folder_origin():
 
     file_folder_name = 'folder_files_origin.txt'
-
     return file_folder_name
 
 
@@ -1203,8 +1430,13 @@ def main():
         set_make_reencode(path_file_report)
 
         # break_point
-        input('Review the file and then type something to ' +
-              'continue.')
+        input('type something to start correcting the duration metadata...')
+        set_correct_duration(path_file_report)
+
+        # break_point
+        input('Review the file and then type something ' +
+              'to go to the main menu.')
+
         clean_cmd()
         main()
         return
@@ -1212,6 +1444,7 @@ def main():
     elif menu_answer == 3:
 
         mb_limit = int(userpref_size_per_file_mb())
+        duration_limit = get_duration_limit()
 
         # establishes separation criteria for the join videos step
         set_group_column(path_file_report)
@@ -1224,13 +1457,13 @@ def main():
         # set start index output file
         start_index_output = get_start_index_output()
 
-        set_split_videos(path_file_report, mb_limit)
+        set_split_videos(path_file_report, mb_limit, duration_limit)
 
         # join all videos
-        set_join_videos(path_file_report, mb_limit, start_index_output)
+        set_join_videos(path_file_report, mb_limit, duration_limit,
+                        start_index_output)
         return
     else:
-
         return
 
 
