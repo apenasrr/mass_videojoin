@@ -179,7 +179,7 @@ def get_list_chunk_videos_from_group(df, group_no, max_size_mb,
                                      duration_limit='00:00:00.00'):
 
     max_size_bytes = max_size_mb * 1024**2
-    mask = df['group_encode'].isin([group_no])
+    mask = df['group_encode'].isin([int(group_no)])
 
     df['file_path'] = df['file_folder'] + '\\' + \
         df['file_name']
@@ -1000,7 +1000,8 @@ def search_to_split_videos(df, mb_limit, duration_limit='00:00:00.00'):
         df_to_split = df.loc[mask_to_be_split,
                             ['file_folder', 'file_name', 'duration',
                              'file_size']]
-        df_to_split['file_path'] = df['file_folder'] + '\\' + df['file_name']
+        df_to_split['file_path'] = df_to_split['file_folder'] + '\\' + \
+                                   df_to_split['file_name']
 
         if duration_limit != '00:00:00.00':
             # col proportion_duration_limit: divide video duration
@@ -1443,6 +1444,9 @@ def main():
 
     elif menu_answer == 3:
 
+        # set start index output file
+        start_index_output = get_start_index_output()
+
         mb_limit = int(userpref_size_per_file_mb())
         duration_limit = get_duration_limit()
 
@@ -1454,8 +1458,7 @@ def main():
               'start the process that look for videos that ' +
               'are too big and should be splitted')
 
-        # set start index output file
-        start_index_output = get_start_index_output()
+
 
         set_split_videos(path_file_report, mb_limit, duration_limit)
 
