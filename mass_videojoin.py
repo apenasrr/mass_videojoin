@@ -9,18 +9,23 @@ import os
 import pandas as pd
 import datetime
 import logging
-from video_tools import change_width_height_mp4, get_video_details, \
-    join_mp4, split_mp4, get_duration, timedelta_to_string, \
-    float_seconds_to_string, float_seconds_from_string
 from config_handler import handle_config_file
 import unidecode
 import natsort
-import glob
 import sys
-import hashlib
+from utils_mass_videojoin import exclude_all_files_from_folder, \
+                                 create_report_backup, \
+                                 get_folder_script_path, \
+                                 time_is_hh_mm_ss_ms
+from video_tools import get_video_details, join_mp4, get_duration, \
+                        timedelta_to_string, float_seconds_to_string, \
+                        float_seconds_from_string
 from transition import check_transition_resolution, \
                        get_video_resolution_format, \
                        get_dict_transition_resolution
+from make_reencode import make_reencode
+from make_split import search_to_split_videos
+from ffprobe_micro import ffprobe
 
 
 def logging_config():
@@ -94,7 +99,7 @@ def gen_report(path_dir):
                              '.mov', '.mkv', '.wmv')
     str_tuple_video_extension = ', '.join(tuple_video_extension)
     logging.info(f'Find for video with extension: {str_tuple_video_extension}')
-    l = []
+    list_dict = []
     for root, _, files in os.walk(path_dir):
 
         for file in files:
@@ -103,6 +108,8 @@ def gen_report(path_dir):
                 logging.info(f'Selected file: {file}')
 
                 path_file = os.path.join(root, file)
+                dict_inf_ffprobe = ffprobe(path_file).get_output_as_dict()
+
                 dict_inf = get_video_details(path_file)
                 # (mode, ino, dev, nlink, uid,
                 #  gid, size, atime, mtime, ctime) = os.stat(path_file)
@@ -139,6 +146,12 @@ def gen_report(path_dir):
                 d['video_profile'] = dict_inf['video']['profile']
                 d['video_resolution'] = dict_inf['video']['resolution']
                 d['video_bitrate'] = dict_inf['video']['bitrate']
+                try:
+                    d['is_avc'] = dict_inf_ffprobe['streams'][0]['is_avc']
+                except:
+                    logging.error('File above dont have tag "is_avc" in ' +
+                                  f'ffprobe output:\n{file}')
+                    d['is_avc'] = ''
 
                 # some videos dont have audio
                 try:
@@ -150,10 +163,10 @@ def gen_report(path_dir):
                     d['audio_frequency'] = ''
                     d['audio_bitrate'] = ''
                 d['video_resolution_to_change'] = ''
-                l.append(d)
+                list_dict.append(d)
             else:
                 logging.info(f'Unselected file: {file}')
-    df = pd.DataFrame(l)
+    df = pd.DataFrame(list_dict)
     return df
 
 
@@ -372,27 +385,6 @@ def transition_update_chunk_videos(list_chunk_videos):
     return list_chunk_videos_update
 
 
-def time_is_hh_mm_ss_ms(str_hh_mm_ss_ms):
-    """test if time value is format hh:mm:ss.ms
-
-    Args:
-        str_hh_mm_ss_ms (str): time value
-
-    Raises:
-        Exception: incorrrect format
-
-    Returns:
-        bol: True if valid
-    """
-
-    try:
-        hr, min, sec = map(float, str_hh_mm_ss_ms.split(':'))
-        return True
-    except:
-        raise Exception(f'The time value "{str_hh_mm_ss_ms} "' +
-                        'need to be in format: hh:mm:ss.ms')
-
-
 def strptimedelta_hh_mm_ss_ms(str_hh_mm_ss_ms):
 
     hr, min, sec = map(float, str_hh_mm_ss_ms.split(':'))
@@ -442,7 +434,7 @@ def join_videos(df, max_size_mb, start_index_output,
     list_chunk_videos = get_list_chunk_videos(df, max_size_mb, duration_limit)
 
     # break point
-    input('Press a key to continue...')
+    # input('Press a key to continue...')
 
     df['file_output'] = ''
 
@@ -471,6 +463,8 @@ def join_videos(df, max_size_mb, start_index_output,
         # register file_name_output in dataframe
         mask_files_joined = df['file_path'].isin(list_file_path)
         df.loc[mask_files_joined, 'file_output'] = file_name_output
+        # TODO: Testar resultado. Colocar caminho absoluto. e nao relativo
+        df.loc[mask_files_joined, 'file_path_output'] = os.path.abspath(file_path_output)
 
     df = join_videos_update_col_duration(df)
     print(f'total: {len(list_chunk_videos)} videos')
@@ -510,220 +504,6 @@ def update_dict_videos_duration(dict_videos_duration, index,
         timedelta_to_string(duration_pos_transition_timedelta)
     dict_videos_duration['duration_real'] = duration_pos_transition_str
     return dict_videos_duration
-
-
-def exclude_all_files_from_folder(path_folder):
-
-    path_folder_regex = os.path.join(path_folder, '*')
-    r = glob.glob(path_folder_regex)
-    for i in r:
-        os.remove(i)
-
-
-def make_reencode(path_file_report):
-
-    def get_file_name_dest(file_folder_origin, file_name_origin):
-        """
-        Create a hashed file name dest.
-        Template: reencode_{file_name_origin}_{hash}.mp4"
-        """
-        file_folder_origin_encode = file_folder_origin.encode('utf-8')
-        hash = hashlib.md5(file_folder_origin_encode).hexdigest()[:5]
-        file_name_origin_without_extension = \
-            os.path.splitext(file_name_origin)[0]
-        file_name_dest = 'reencode_' + \
-                         file_name_origin_without_extension + '_' + \
-                         hash + '.mp4'
-        return file_name_dest
-
-    def create_backup_columns(df):
-
-        # Ensure creation of column bellow
-        list_backup_columns = ('file_folder', 'file_name', 'file_size',
-                               'video_resolution')
-
-        for column_name in list_backup_columns:
-            new_column_name = column_name + '_origin'
-            if new_column_name not in df.columns:
-                df[new_column_name] = df[column_name]
-        return df
-
-    def get_next_video_to_reencode(path_file_report):
-
-        try:
-            df = pd.read_excel(path_file_report, engine='openpyxl')
-        except Exception as e:
-            logging.error(f"Can't open file: {path_file_report}")
-            logging.error(e)
-        mask_df_to_reencode = ~df['video_resolution_to_change'].isna()
-        mask_df_reencode_not_done = df['reencode_done'].isin([0])
-        mask_df_to_reencode = mask_df_to_reencode & mask_df_reencode_not_done
-
-        df_to_reencode = df.loc[mask_df_to_reencode, :]
-
-        qt_videos_to_reencode = df_to_reencode.shape[0]
-        if qt_videos_to_reencode == 0:
-            return False
-
-        df_to_reencode = df_to_reencode.reset_index(drop=True)
-        dict_first_line = df_to_reencode.loc[0, :]
-        return dict_first_line
-
-    def reencode_video(dict_):
-
-        try:
-            video_resolution_to_change = dict_['video_resolution_to_change']
-            size_width, size_height = \
-                video_resolution_to_change.split('x')
-        except:
-            path_file_origin = os.path.join(dict_['file_folder_origin'],
-                                            dict_['file_name_origin'])
-            logging.error('Parse. Column video_resolution_to_change: ' +
-                          f'"{video_resolution_to_change}". '
-                          f'File:\n{path_file_origin}')
-            return False
-
-        file_folder_origin = dict_['file_folder_origin']
-        file_name_origin = dict_['file_name_origin']
-        path_file_origin = os.path.join(file_folder_origin,
-                                        file_name_origin)
-
-        file_name_dest = get_file_name_dest(file_folder_origin,
-                                            file_name_origin)
-
-        path_folder_dest = os.path.join(folder_script_path, 'videos_encoded')
-        path_file_dest = os.path.join(path_folder_dest,
-                                      file_name_dest)
-
-        # Make video reencode
-        logging.info(f'Start reencode: {path_file_origin}')
-
-        change_width_height_mp4(path_file_origin, size_height,
-                                size_width, path_file_dest)
-
-    def ask_for_delete_old_videos_encode(path_folder_encoded):
-
-        for _, _, files in os.walk(path_folder_encoded):
-
-            list_file_name_encoded = list(files)
-
-        len_list_file_name_encoded = len(list_file_name_encoded)
-        if len_list_file_name_encoded > 0:
-            print('\nThere is files in videos_encoded folder.\n' +
-                  'Do you wish delete them?')
-            answer_delete = input('(None for yes) Answer: ')
-
-            if answer_delete == '':
-                confirm_delete = input('\nType Enter to delete all ' +
-                                       'video_encoded files.')
-                if confirm_delete == '':
-                    exclude_all_files_from_folder(path_folder_encoded)
-                else:
-                    pass
-
-    def update_file_report(path_file_report, dict_video_data):
-
-        try:
-            df = pd.read_excel(path_file_report, engine='openpyxl')
-        except Exception as e:
-            logging.error(f"Can't open file: {path_file_report}")
-            logging.error(e)
-
-        # find path_folder_dest and path_file_dest
-        file_folder_origin = dict_video_data['file_folder_origin']
-        file_name_origin = dict_video_data['file_name_origin']
-        path_file_origin = os.path.join(file_folder_origin,
-                                        file_name_origin)
-        file_name_dest = get_file_name_dest(file_folder_origin,
-                                            file_name_origin)
-        path_folder_dest = os.path.join(folder_script_path,
-                                        'videos_encoded')
-        path_file_dest = os.path.join(path_folder_dest,
-                                      file_name_dest)
-
-        # Check if file_name_dest exist
-        test_file_exist = os.path.isfile(path_file_dest)
-        if test_file_exist is False:
-            logging.error('After reencode, when update, ' +
-                          f'reencoded file not exist:\n{path_file_dest}')
-            sys.exit()
-
-        # locate index video in df
-        mask_file_folder = df['file_folder'].isin([file_folder_origin])
-        mask_file_name = df['file_name_origin'].isin([file_name_origin])
-        mask_line = mask_file_folder & mask_file_name
-        df_filter = df.loc[mask_line, :]
-        len_df_filter = len(df_filter)
-        if len_df_filter != 1:
-            logging.error(f'Need 1. Find {len_df_filter} line for ' +
-                          f'video: {path_file_origin}')
-            sys.exit()
-        index_video = df_filter.index
-
-        # update df
-        df.loc[index_video, 'file_folder'] = \
-            os.path.abspath(path_folder_dest)
-        df.loc[index_video, 'file_name'] = file_name_dest
-
-        file_size = os.stat(path_file_dest).st_size
-        video_resolution_to_change = \
-            dict_video_data['video_resolution_to_change']
-
-        df.loc[index_video, 'file_size'] = file_size
-        df.loc[index_video, 'video_resolution'] = \
-            video_resolution_to_change
-
-        # from encoded video get video metadata
-        metadata = get_video_details(path_file_dest)
-        # register video metadata
-        df.loc[index_video, 'bitrate'] = metadata['bitrate']
-        df.loc[index_video, 'video_bitrate'] = metadata['video']['bitrate']
-        df.loc[index_video, 'video_codec'] = metadata['video']['codec']
-        df.loc[index_video, 'audio_codec'] = metadata['audio']['codec']
-        df.loc[index_video, 'audio_bitrate'] = metadata['audio']['bitrate']
-        df.loc[index_video, 'duration'] = metadata['duration']
-        df.loc[index_video, 'reencode_done'] = 1
-        return df
-
-    folder_script_path = get_folder_script_path()
-    path_folder_encoded = os.path.join(folder_script_path, 'videos_encoded')
-
-    df = pd.read_excel(path_file_report, engine='openpyxl')
-    df = create_backup_columns(df)
-
-    ask_for_delete_old_videos_encode(path_folder_encoded)
-
-    # Ensure creation of column 'reencode_done'. Pseudobolean 1 or 0
-    if 'reencode_done' not in df.columns:
-        df['reencode_done'] = 0
-
-    # Save reports
-    df.to_excel(path_file_report, index=False)
-    create_report_backup(df=df, path_file_report=path_file_report,
-                         tag='reencode')
-
-    need_reencode = True
-    while need_reencode:
-        return_next_video_to_reencode = \
-            get_next_video_to_reencode(path_file_report)
-        if return_next_video_to_reencode is False:
-            logging.info('\nThere are no videos to reencode')
-            need_reencode = False
-            continue
-
-        dict_video_data = return_next_video_to_reencode
-        return_reencode_video = reencode_video(dict_video_data)
-        if return_reencode_video is False:
-            sys.exit()
-            return
-
-        df = update_file_report(path_file_report, dict_video_data)
-
-        # Save reports
-        df.to_excel(path_file_report, index=False)
-        create_report_backup(df=df, path_file_report=path_file_report,
-                             tag='reencode')
-    return df
 
 
 def correct_duration(path_file_report):
@@ -813,267 +593,6 @@ def menu_ask():
         # eng
         msg_invalid_option = "Invalid option"
         raise msg_invalid_option
-
-
-def df_insert_row(row_number, df, row_value):
-    """
-    A customized function to insert a row at any given position in the
-     dataframe.
-    source: https://www.geeksforgeeks.org/insert-row-at-given-position-in-pandas-dataframe/
-    :input: row_number: Int.
-    :input: df: Dataframe.
-    :input: row_value: Int.
-    :return: Dataframe. df_result |
-             Boolean. False. If the row_number was invalid.
-    """
-
-    if row_number > df.index.max()+1:
-        print("df_insert_row: Invalid row_number")
-        return False
-
-    # Slice the upper half of the dataframe
-    df1 = df[0:row_number]
-
-    # Store the result of lower half of the dataframe
-    df2 = df[row_number:]
-
-    # Inser the row in the upper half dataframe
-    df1.loc[row_number] = row_value
-
-    # Concat the two dataframes
-    df_result = pd.concat([df1, df2])
-
-    # Reassign the index labels
-    df_result.index = [*range(df_result.shape[0])]
-
-    # Return the updated dataframe
-    return df_result
-
-
-def search_to_split_videos(df, mb_limit, duration_limit='00:00:00.00'):
-    """Searches for videos larger than a certain limit and split them in
-       folder 'videos_splitted'.
-
-    Args:
-        df (dataframe): video_details.xlsx. Required columns:
-                        [file_folder, file_name, file_size]
-        mb_limit (int): Video size limit  in megabytes
-        duration_limit (str, optional): Video duration limit.
-                                        Format hh:mm:ss.ms.
-                                        Defaults to '00:00:00.00'.
-    Returns:
-        (dataframe): dataframe updated with new columns:
-                     [file_path, split_file_folder_origin,
-                      split_file_name_origin, split_file_size_origin]
-    """
-
-    def preprocess_df_split(df):
-
-        df['file_path'] = df['file_folder'] + '\\' + df['file_name']
-        df['split_file_folder_origin'] = ''
-        df['split_file_name_origin'] = ''
-        df['split_file_size_origin'] = ''
-        return df
-
-    def get_dict_row_dest(dict_row_origin, pathfile_output):
-
-        path_folder_dest = os.path.split(pathfile_output)[0]
-        file_name_dest = os.path.split(pathfile_output)[1]
-        file_size_dest = os.stat(pathfile_output).st_size
-
-        dict_row_dest = dict_row_origin.copy()
-        dict_row_dest['split_file_folder_origin'] = \
-            dict_row_origin['file_folder']
-        dict_row_dest['split_file_name_origin'] = dict_row_origin['file_name']
-        dict_row_dest['split_file_size_origin'] = dict_row_origin['file_size']
-
-        dict_row_dest['file_folder'] = path_folder_dest
-        dict_row_dest['file_name'] = file_name_dest
-        dict_row_dest['file_size'] = file_size_dest
-
-        float_duration = get_duration(pathfile_output)
-        str_duration = float_seconds_to_string(float_duration)
-        dict_row_dest['duration'] = str_duration
-        return dict_row_dest
-
-    def get_row_number_from_filepath(df, file_path_origin):
-
-        path_folder_origin = os.path.split(file_path_origin)[0]
-        file_name_origin = os.path.split(file_path_origin)[1]
-
-        mask1 = df['file_folder'].isin([path_folder_origin])
-        mask2 = df['file_name'].isin([file_name_origin])
-        mask_file = mask1 & mask2
-
-        df_row_origin = df.loc[mask_file, :]
-        row_number = df_row_origin.index.values[0]
-        return row_number
-
-    def delete_fileorigin(df, file_path_origin):
-
-        row_number = get_row_number_from_filepath(df, file_path_origin)
-        df = df.drop(df.index[[row_number]])
-        df = df.reset_index(drop=True)
-        return df
-
-    def update_df_files(df, file_path_origin, list_filepath_output):
-
-        def include_rows_new_files(df, filepath_output):
-
-            pathfile_output = os.path.abspath(filepath_output)
-            # find the row_number of origin file
-            row_number = get_row_number_from_filepath(df, file_path_origin)
-            dict_row_origin = df.loc[row_number, :]
-            dict_row_dest = get_dict_row_dest(dict_row_origin, pathfile_output)
-            df = df_insert_row(row_number=row_number, df=df,
-                               row_value=dict_row_dest)
-            return df
-
-        for filepath_output in list_filepath_output:
-            # include the rows corresponding to the new files created
-            df = include_rows_new_files(df=df,
-                                        filepath_output=filepath_output)
-
-        # delete the file origin row
-        df = delete_fileorigin(df=df, file_path_origin=file_path_origin)
-        return df
-
-    def get_mask_duration_longer_than(serie_str_duration, str_duration_limit):
-        """
-
-        Args:
-            serie_str_duration (series): string duration series in format:
-                                        hh:mm:ss.ms
-            str_duration_limit ([type]): string duration in format: hh:mm:ss.ms
-
-        Returns:
-            series: boolean mask series. True = longer than limit.
-        """
-
-        serie_timedelta_duration = pd.to_timedelta(serie_str_duration)
-        timedelta_duration_limit = pd.to_timedelta(str_duration_limit)
-        mask_duration_limit = \
-            serie_timedelta_duration > timedelta_duration_limit
-        return mask_duration_limit
-
-    def get_mask_to_be_split(df, size_limit,
-                             duration_limit='00:00:00.00'):
-
-        """[summary]
-
-        Returns:
-            (series bol): mask to df indicate which rows
-                            need to be split
-
-        """
-
-        mask_size = df['file_size'] > size_limit
-
-        if duration_limit != '00:00:00.00':
-            serie_str_duration = df['duration']
-            mask_duration = \
-                get_mask_duration_longer_than(
-                    serie_str_duration=serie_str_duration,
-                    str_duration_limit=duration_limit)
-            mask_to_be_split = mask_size | mask_duration
-        else:
-            mask_to_be_split = mask_size
-        return mask_to_be_split
-
-    def get_list_dict_path_file_mb_limit(df, size_limit,
-                                         duration_limit='00:00:00.00'):
-        """get list of the files to be splited and
-        their maximum split size in megabyte
-
-        Args:
-            df (dataframe): [description]
-            size_limit (int): limite size in bytes
-            duration_limit (str): duration limit in format: hh:mm:ss.ms
-
-        Returns:
-            list: list of dict. keys: [path_file, mb_limit]
-        """
-
-        mask_to_be_split = get_mask_to_be_split(df, size_limit,
-                                                duration_limit)
-
-        df_to_split = df.loc[mask_to_be_split,
-                            ['file_folder', 'file_name', 'duration',
-                             'file_size']]
-        df_to_split['file_path'] = df_to_split['file_folder'] + '\\' + \
-                                   df_to_split['file_name']
-
-        if duration_limit != '00:00:00.00':
-            # col proportion_duration_limit: divide video duration
-            #                                by the duration limit.
-            df_to_split['timedelta_duration'] = \
-                pd.to_timedelta(df_to_split['duration'])
-            timedelta_duration_limit = pd.to_timedelta(duration_limit)
-            df_to_split['proportion_duration_limit'] = \
-                df_to_split['timedelta_duration'] / timedelta_duration_limit
-
-            # col size_limit_by_duration
-            df_to_split['size_limit_by_duration'] = \
-                df_to_split['file_size'] // \
-                    df_to_split['proportion_duration_limit']
-
-            # col size_split: lowest value between
-            #                 size_limit_by_duration and size_limit
-            df_to_split['size_limit'] = size_limit
-            df_to_split['size_split'] = df_to_split[['size_limit_by_duration',
-                                                    'size_limit']].min(axis=1)
-
-            # col mb_limit: convert size_split from bytes to mb
-            df_to_split['mb_limit'] = df_to_split['size_split'] // (1024 ** 2)
-        else:
-            df_to_split['mb_limit'] = df_to_split['size_limit'] // (1024 ** 2)
-
-        list_dict = []
-        for _, row in df_to_split.iterrows():
-            dict_ = {}
-            dict_['file_path'] = row['file_path']
-            dict_['mb_limit'] = int(row['mb_limit'])
-            str_duration = row['duration']
-            dict_['float_duration_sec'] = \
-                float_seconds_from_string(str_duration)
-            list_dict.append(dict_)
-        return list_dict
-
-    df = preprocess_df_split(df)
-
-    recoil_sec = 10
-
-    # TODO: estimate the recoil_mbsize by video bitrate. Set 10 mb arbitrarily
-    recoil_mbsize = 10
-    size_limit = (mb_limit - recoil_mbsize) * 1024 ** 2
-
-    if duration_limit != '00:00:00.00':
-        # ensure duration_limit is valid or raise error
-        time_is_hh_mm_ss_ms(str_hh_mm_ss_ms=duration_limit)
-
-    list_dict_path_file_mb_limit = \
-        get_list_dict_path_file_mb_limit(df=df,
-                                         size_limit=size_limit,
-                                         duration_limit=duration_limit)
-
-    folder_script_path = get_folder_script_path()
-    output_folder_path = os.path.join(folder_script_path, 'videos_splitted')
-    exclude_all_files_from_folder(output_folder_path)
-
-    for dict_path_file_mb_limit in list_dict_path_file_mb_limit:
-        file_path = dict_path_file_mb_limit['file_path']
-        mb_limit = dict_path_file_mb_limit['mb_limit']
-        float_duration_sec = dict_path_file_mb_limit['float_duration_sec']
-        list_filepath_output = \
-            split_mp4(largefile_path=file_path,
-                      recoil=recoil_sec,
-                      mb_limit=mb_limit,
-                      output_folder_path=output_folder_path,
-                      original_video_duration_sec=float_duration_sec)
-
-        df = update_df_files(df=df, file_path_origin=file_path,
-                             list_filepath_output=list_filepath_output)
-    return df
 
 
 def userpref_folderoutput():
@@ -1221,7 +740,8 @@ def prefill_video_resolution_to_change(df):
         df['video_codec'] + '-' + \
         df['video_resolution']
 
-    df_key = df[['key_join_checker', 'duration', 'video_resolution']].copy()
+    df_key = df[['key_join_checker', 'duration',
+                 'video_resolution', 'is_avc']].copy()
     df_key['duration_timedelta'] = pd.to_timedelta(df_key['duration'])
     df_key['duration_min'] = df_key['duration_timedelta'].dt.total_seconds()/60
 
@@ -1229,7 +749,8 @@ def prefill_video_resolution_to_change(df):
 
     df_key_agg = \
         df_key.groupby(['key_join_checker',
-                        'video_resolution'])['duration_min'].agg('sum')
+                        'video_resolution',
+                        'is_avc'])['duration_min'].agg('sum')
     # convert in dataframe
     df_key_agg = df_key_agg.reset_index()
     # sort dataframe
@@ -1240,19 +761,26 @@ def prefill_video_resolution_to_change(df):
     key_join_main = df_key_agg.loc[index_max, 'key_join_checker']
     video_resolution_main = df_key_agg.loc[index_max, 'video_resolution']
 
-    # informar quantidade de minutos para reencodar
-    mask_to_convert = ~df_key_agg.index.isin([index_max])
+    # show quantity of minutes to reencode
+    mask_to_convert_1 = ~df_key_agg.index.isin([index_max])
+    mask_to_convert_2 = ~df_key_agg['is_avc'].isin(['true'])
+    mask_to_convert = mask_to_convert_1 | mask_to_convert_2
+
     minutes_to_reencode = df_key_agg.loc[mask_to_convert, 'duration_min'].sum()
     minutes_total = df_key_agg['duration_min'].sum()
     percent_to_reencode = minutes_to_reencode/minutes_total
     print(f'The main profile is "{key_join_main}"')
 
-    # informar percentual de minutos para reencodar
+    # show percentage of minutes to reencode
     # the command ':.1f' fix 1 digit after decimal point
     print(f'There is {minutes_to_reencode:.1f} minutes ' +
           f'({percent_to_reencode*100:.0f}%) to reencode')
 
-    mask_resolution_to_change = ~df['key_join_checker'].isin([key_join_main])
+    mask_resolution_to_change_1 = ~df['key_join_checker'].isin([key_join_main])
+    mask_resolution_to_change_2 = ~df['is_avc'].isin(['true'])
+    mask_resolution_to_change = mask_resolution_to_change_1 | \
+                                mask_resolution_to_change_2
+
     df.loc[mask_resolution_to_change,
            'video_resolution_to_change'] = video_resolution_main
     df.drop('key_join_checker', axis=1, inplace=True)
@@ -1263,16 +791,6 @@ def save_upload_folder_name(path_dir, file_folder_name):
 
     dir_name_normalize = get_folder_name_normalized(path_dir)
     create_txt(file_path=file_folder_name, stringa=dir_name_normalize)
-
-
-def create_report_backup(df, path_file_report, tag):
-
-    path_folder = os.path.dirname(path_file_report)
-    file_name = os.path.basename(path_file_report)
-    file_name_without_extension = os.path.splitext(file_name)[0]
-    file_name_backup = file_name_without_extension + "_" + tag + ".xlsx"
-    path_file_backup = os.path.join(path_folder, file_name_backup)
-    df.to_excel(path_file_backup, index=False)
 
 
 def step_create_report_filled(path_dir, path_file_report):
@@ -1309,7 +827,6 @@ def set_correct_duration(path_file_report):
     # make backup
     create_report_backup(
         df=df, path_file_report=path_file_report, tag='correct_duration')
-    print('\nCorrected Duration column')
 
 
 def set_group_column(path_file_report):
@@ -1358,13 +875,6 @@ def set_join_videos(path_file_report, mb_limit, duration_limit='00:00:00,00',
     # backup joined
     create_report_backup(
         df=df, path_file_report=path_file_report, tag='joined')
-
-
-def get_folder_script_path():
-
-    folder_script_path_relative = os.path.dirname(__file__)
-    folder_script_path = os.path.realpath(folder_script_path_relative)
-    return folder_script_path
 
 
 def set_path_file_report():
@@ -1430,9 +940,9 @@ def main():
         # reencode videos mark in column video_resolution_to_change
         set_make_reencode(path_file_report)
 
-        # break_point
-        input('type something to start correcting the duration metadata...')
+        print('start correcting the duration metadata')
         set_correct_duration(path_file_report)
+        print('\nDuration metadata corrected.')
 
         # break_point
         input('Review the file and then type something ' +
@@ -1457,8 +967,6 @@ def main():
         input('Review the file and then type something to ' +
               'start the process that look for videos that ' +
               'are too big and should be splitted')
-
-
 
         set_split_videos(path_file_report, mb_limit, duration_limit)
 

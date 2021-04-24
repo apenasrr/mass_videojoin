@@ -24,7 +24,7 @@ def get_video_resolution(file_path):
     result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
                              "stream=width,height", "-of",
                              "default=noprint_wrappers=1:nokey=1",
-                             file_path],
+                             file_path] ,
                              stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT)
 
@@ -65,8 +65,6 @@ def change_width_height_mp4(path_file_video_origin, size_height,
     More info: https://www.reck.dk/ffmpeg-autoscale-on-height-or-width/
     :input: size_height: Eg. 480 or 720 or 1080...
     """
-    # TODO include change of audio codec and video codec. optional argument. \
-    # Useful to change for the 'main codecs' of the loot
 
     logging.info(f'Changing height to {size_height}: {path_file_video_origin}')
 
@@ -78,7 +76,9 @@ def change_width_height_mp4(path_file_video_origin, size_height,
     # for fix audio codec to aac | https://trac.ffmpeg.org/wiki/Encode/AAC
     stringa = f'ffmpeg -y -i "{path_file_video_origin}" ' + \
               f'-vf scale={size_width}:{size_height},setsar=1:1 ' + \
-              f'-c:v libx264 -maxrate {str_maxrate}k ' + \
+              '-c:v libx264 -preset ultrafast -flags +global_header ' + \
+              '-pix_fmt yuv420p -profile:v baseline -movflags +faststart ' + \
+              f'-maxrate {str_maxrate}k ' + \
               f'-bufsize {str_bufsize}k -c:a aac "{path_file_video_dest}"'
 
     os.system(stringa)
@@ -221,6 +221,7 @@ def float_seconds_from_string(str_hh_mm_ss_ms):
 
 def get_duration(file_path):
 
+    #TODO use ffprobe_micro
     result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
                                 "format=duration", "-of",
                                 "default=noprint_wrappers=1:nokey=1",
@@ -303,7 +304,7 @@ def join_mp4(list_file_path, file_name_output):
         if index != index_final:
             stringa += "|"
         else:
-            stringa += "\" -c copy  -bsf:a aac_adtstoasc " + \
+            stringa += "\" -c copy -flags +global_header -pix_fmt yuv420p -movflags +faststart -bsf:a aac_adtstoasc " + \
                 f"{file_name_output}"
 
     os.system(stringa)
