@@ -9,7 +9,6 @@ import os
 import pandas as pd
 import datetime
 import logging
-from config_handler import handle_config_file
 import unidecode
 import natsort
 import sys
@@ -26,6 +25,7 @@ from transition import check_transition_resolution, \
 from make_reencode import make_reencode
 from make_split import search_to_split_videos
 from ffprobe_micro import ffprobe
+from configparser import ConfigParser
 
 
 def logging_config():
@@ -90,13 +90,12 @@ def df_sort_human(df):
     return df
 
 
-def gen_report(path_dir):
+def gen_report(path_dir, video_extensions):
 
     # To input more file video extension:
     #  https://dotwhat.net/type/video-movie-files
 
-    tuple_video_extension = (".mp4", ".avi", ".webm", '.ts', '.vob',
-                             '.mov', '.mkv', '.wmv')
+    tuple_video_extension = tuple(video_extensions)
     str_tuple_video_extension = ', '.join(tuple_video_extension)
     logging.info(f'Find for video with extension: {str_tuple_video_extension}')
     list_dict = []
@@ -463,8 +462,9 @@ def join_videos(df, max_size_mb, start_index_output,
         # register file_name_output in dataframe
         mask_files_joined = df['file_path'].isin(list_file_path)
         df.loc[mask_files_joined, 'file_output'] = file_name_output
-        # TODO: Testar resultado. Colocar caminho absoluto. e nao relativo
-        df.loc[mask_files_joined, 'file_path_output'] = os.path.abspath(file_path_output)
+
+        df.loc[mask_files_joined, 'file_path_output'] = \
+            os.path.abspath(file_path_output)
 
     df = join_videos_update_col_duration(df)
     print(f'total: {len(list_chunk_videos)} videos')
@@ -595,76 +595,48 @@ def menu_ask():
         raise msg_invalid_option
 
 
-def userpref_folderoutput():
+def userpref_folderoutput(path_folder_output, path_file_config):
 
-    path_file = os.path.join('config', 'config.txt')
-    variable_name = 'path_folder_output'
-    variable_value = \
-        handle_config_file(path_file, variable_name,
-                           set_value=None, parse=True)
-    path_folder_output = variable_value['path_folder_output'][0]
-
-    print(f'Use the folder path output as {path_folder_output}?')
+    print(f'Use the folder path output as "{path_folder_output}"?')
     answer_use = input('(None for yes) Answer: ')
     if answer_use == '':
-        pass
+        return path_folder_output
     else:
-        path_folder_output = input('Inform the folder path output: ')
-        handle_config_file(path_file, variable_name,
-                           set_value=path_folder_output, parse=False)
-    return path_folder_output
+        new_path_folder_output = input('Inform the folder path output: ')
+        config_update_data(path_file_config,
+                           'path_folder_output',
+                           new_path_folder_output)
+    return new_path_folder_output
 
 
-def userpref_size_per_file_mb():
+def userpref_size_per_file_mb(size_per_file_mb, path_file_config):
 
-    folder_script_path = get_folder_script_path()
-    path_file = os.path.join(folder_script_path, 'config', 'config.txt')
-    variable_name = 'size_per_file_mb'
-
-    question = 'What should be the maximum size of each ' + \
-               'file in mb (e.g.: 500)? '
-
-    variable_value = \
-        handle_config_file(path_file, variable_name,
-                           set_value=None, parse=True)
-    value_got = variable_value[variable_name][0]
-
-    print(f'The maximum size of each file will be {value_got}. Ok?')
+    print(f'The maximum size of each file will be {size_per_file_mb}. Ok?')
     answer_use = input('(None for yes) Answer: ')
     if answer_use == '':
-        pass
+        return size_per_file_mb
     else:
-        value_got = input(question)
-        handle_config_file(path_file, variable_name,
-                           set_value=value_got, parse=False)
-    return value_got
+        question_new_value = 'What should be the maximum size of each ' + \
+                             'file in mb (e.g.: 500)? '
+
+        new_size_per_file_mb = input(question_new_value)
+        config_update_data(path_file_config,
+                           'size_per_file_mb',
+                           new_size_per_file_mb)
+    return new_size_per_file_mb
 
 
-def get_transition_effect_status():
+def get_transition_effect_status(activate_transition):
 
-    folder_script_path = get_folder_script_path()
-    path_file = os.path.join(folder_script_path, 'config', 'config.txt')
-    variable_name = 'activate_transition'
-    variable_value = \
-        handle_config_file(path_file, variable_name,
-                           set_value=None, parse=True)
-    transition_effect_status = variable_value['activate_transition'][0]
-    if transition_effect_status == 'true':
+    if activate_transition == 'true':
         transition_effect_status = True
     else:
         transition_effect_status = False
     return transition_effect_status
 
 
-def get_duration_limit():
+def get_duration_limit(duration_limit):
 
-    folder_script_path = get_folder_script_path()
-    path_file = os.path.join(folder_script_path, 'config', 'config.txt')
-    variable_name = 'duration_limit'
-    variable_value = \
-        handle_config_file(path_file, variable_name,
-                           set_value=None, parse=True)
-    duration_limit = variable_value[variable_name][0]
     # ensure duration_limit is valid or raise error
     time_is_hh_mm_ss_ms(str_hh_mm_ss_ms=duration_limit)
     return duration_limit
@@ -793,9 +765,9 @@ def save_upload_folder_name(path_dir, file_folder_name):
     create_txt(file_path=file_folder_name, stringa=dir_name_normalize)
 
 
-def step_create_report_filled(path_dir, path_file_report):
+def step_create_report_filled(path_dir, path_file_report, video_extensions):
 
-    df = gen_report(path_dir)
+    df = gen_report(path_dir, video_extensions)
     # sort path_file by natural human way
     df = df_sort_human(df)
     # prefill column video_resolution_to_change
@@ -862,12 +834,12 @@ def set_split_videos(path_file_report, mb_limit, duration_limit='00:00:00,00'):
 
 
 def set_join_videos(path_file_report, mb_limit, duration_limit='00:00:00,00',
-                    start_index_output=1):
+                    start_index_output=1, activate_transition='false'):
 
     df = pd.read_excel(path_file_report, engine='openpyxl')
 
     # set in config/config.txt if transition_effect are true or false
-    transition_status = get_transition_effect_status()
+    transition_status = get_transition_effect_status(activate_transition)
     df = join_videos(df, mb_limit, start_index_output,
                      duration_limit, transition_status)
     df.to_excel(path_file_report, index=False)
@@ -903,6 +875,28 @@ def get_start_index_output():
     return add_num
 
 
+def get_config_data(path_file_config):
+    """get default configuration data from file config.ini
+
+    Returns:
+        dict: config data
+    """
+
+    config_file = ConfigParser()
+    config_file.read(path_file_config)
+    default_config = dict(config_file['default'])
+    return default_config
+
+
+def config_update_data(path_file_config, variable_name, variable_value):
+
+    config = ConfigParser()
+    config.read(path_file_config)
+    config.set('default', variable_name, variable_value)
+    with open(path_file_config, "w+") as config_updated:
+        config.write(config_updated)
+
+
 def main():
 
     ensure_folders_existence()
@@ -915,6 +909,15 @@ def main():
         pass
     menu_answer = menu_ask()
 
+    folder_script_path = get_folder_script_path()
+    path_file_config = os.path.join(folder_script_path, 'config.ini')
+    config_data = get_config_data(path_file_config)
+    size_per_file_mb = int(config_data['size_per_file_mb'])
+    path_folder_output = config_data['path_folder_output']
+    activate_transition = config_data['activate_transition']
+    duration_limit = config_data['duration_limit']
+    video_extensions = config_data['video_extensions'].split(',')
+
     if menu_answer == 1:
         # create Dataframe of video details
         path_dir = input('\nPaste the folder link where are the video files: ')
@@ -924,7 +927,7 @@ def main():
 
         path_file_report = set_path_file_report()
 
-        step_create_report_filled(path_dir, path_file_report)
+        step_create_report_filled(path_dir, path_file_report, video_extensions)
 
         print('\nIf necessary, change the reencode plan in the column ' +
               '"video_resolution_to_change"')
@@ -957,8 +960,9 @@ def main():
         # set start index output file
         start_index_output = get_start_index_output()
 
-        mb_limit = int(userpref_size_per_file_mb())
-        duration_limit = get_duration_limit()
+        mb_limit = int(userpref_size_per_file_mb(size_per_file_mb,
+                                                 path_file_config))
+        duration_limit = get_duration_limit(duration_limit)
 
         # establishes separation criteria for the join videos step
         set_group_column(path_file_report)
@@ -972,7 +976,7 @@ def main():
 
         # join all videos
         set_join_videos(path_file_report, mb_limit, duration_limit,
-                        start_index_output)
+                        start_index_output, activate_transition)
         return
     else:
         return

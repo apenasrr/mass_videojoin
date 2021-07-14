@@ -1,4 +1,0 @@
-path_folder_output='none'
-size_per_file_mb='999'
-activate_transition='false'
-duration_limit='99:00:00.00'
