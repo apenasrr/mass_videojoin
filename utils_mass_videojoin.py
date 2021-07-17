@@ -1,6 +1,28 @@
 import os
 import glob
 import pandas as pd
+import natsort
+
+
+def sort_human(list_):
+
+    list_ = natsort.natsorted(list_)
+    return list_
+
+
+def sort_df_column_from_list(df, column_name, sorter):
+    """
+    :input: df: DataFrame
+    :input: column_name: String
+    :input: sorter: List
+    :return: DataFrame
+    """
+
+    sorterIndex = dict(zip(sorter, range(len(sorter))))
+    df['order'] = df[column_name].map(sorterIndex)
+    df.sort_values(['order'], ascending=[True], inplace=True)
+    df.drop(['order'], 1, inplace=True)
+    return df
 
 
 def df_insert_row(row_number, df, row_value):

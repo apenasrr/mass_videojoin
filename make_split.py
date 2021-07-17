@@ -8,7 +8,6 @@ from video_tools import get_duration, float_seconds_to_string, \
 
 def preprocess_df_split(df):
 
-    df['file_path'] = df['file_folder'] + '\\' + df['file_name']
     df['split_file_folder_origin'] = ''
     df['split_file_name_origin'] = ''
     df['split_file_size_origin'] = ''
@@ -23,11 +22,11 @@ def get_dict_row_dest(dict_row_origin, pathfile_output):
 
     dict_row_dest = dict_row_origin.copy()
     dict_row_dest['split_file_folder_origin'] = \
-        dict_row_origin['file_folder']
+        dict_row_origin['file_path_folder']
     dict_row_dest['split_file_name_origin'] = dict_row_origin['file_name']
     dict_row_dest['split_file_size_origin'] = dict_row_origin['file_size']
 
-    dict_row_dest['file_folder'] = path_folder_dest
+    dict_row_dest['file_path_folder'] = path_folder_dest
     dict_row_dest['file_name'] = file_name_dest
     dict_row_dest['file_size'] = file_size_dest
 
@@ -42,7 +41,7 @@ def get_row_number_from_filepath(df, file_path_origin):
     path_folder_origin = os.path.split(file_path_origin)[0]
     file_name_origin = os.path.split(file_path_origin)[1]
 
-    mask1 = df['file_folder'].isin([path_folder_origin])
+    mask1 = df['file_path_folder'].isin([path_folder_origin])
     mask2 = df['file_name'].isin([file_name_origin])
     mask_file = mask1 & mask2
 
@@ -53,9 +52,12 @@ def get_row_number_from_filepath(df, file_path_origin):
 
 def delete_fileorigin(df, file_path_origin):
 
+    df.to_excel('df_delete_fileorigin.xlsx', index=False)
     row_number = get_row_number_from_filepath(df, file_path_origin)
+
     df = df.drop(df.index[[row_number]])
     df = df.reset_index(drop=True)
+    df.to_excel('df_delete_fileorigin_after.xlsx', index=False)
     return df
 
 
@@ -131,7 +133,7 @@ def get_list_dict_path_file_mb_limit(df, size_limit,
     their maximum split size in megabyte
 
     Args:
-        df (dataframe): [description]
+        df (dataframe): columns: file_path, duration, file_size
         size_limit (int): limite size in bytes
         duration_limit (str): duration limit in format: hh:mm:ss.ms
 
@@ -143,10 +145,10 @@ def get_list_dict_path_file_mb_limit(df, size_limit,
                                             duration_limit)
 
     df_to_split = df.loc[mask_to_be_split,
-                         ['file_folder', 'file_name', 'duration',
+                         ['file_path_folder', 'file_name', 'duration',
                           'file_size']]
-    df_to_split['file_path'] = \
-        df_to_split['file_folder'] + '\\' + df_to_split['file_name']
+    df_to_split['path_file'] = \
+        df_to_split['file_path_folder'] + '\\' + df_to_split['file_name']
 
     if duration_limit != '00:00:00.00':
         # col proportion_duration_limit: divide video duration
@@ -176,7 +178,7 @@ def get_list_dict_path_file_mb_limit(df, size_limit,
     list_dict = []
     for _, row in df_to_split.iterrows():
         dict_ = {}
-        dict_['file_path'] = row['file_path']
+        dict_['path_file'] = row['path_file']
         dict_['mb_limit'] = int(row['mb_limit'])
         str_duration = row['duration']
         dict_['float_duration_sec'] = \
@@ -185,27 +187,27 @@ def get_list_dict_path_file_mb_limit(df, size_limit,
     return list_dict
 
 
-def search_to_split_videos(df, mb_limit, duration_limit='00:00:00.00'):
+def search_to_split_videos(df, mb_limit, path_folder_videos_splitted,
+                           duration_limit='00:00:00.00'):
     """Searches for videos larger than a certain limit and split them in
        folder 'videos_splitted'.
 
     Args:
         df (dataframe): video_details.xlsx. Required columns:
-                        [file_folder, file_name, file_size]
+                        [file_path_folder, file_name, file_size]
         mb_limit (int): Video size limit  in megabytes
         duration_limit (str, optional): Video duration limit.
                                         Format hh:mm:ss.ms.
                                         Defaults to '00:00:00.00'.
     Returns:
         (dataframe): dataframe updated with new columns:
-                     [file_path, split_file_folder_origin,
+                     [path_file, split_file_folder_origin,
                       split_file_name_origin, split_file_size_origin]
     """
 
     df = preprocess_df_split(df)
 
     recoil_sec = 10
-
     # TODO: estimate the recoil_mbsize by video bitrate. Set 10 mb arbitrarily
     recoil_mbsize = 10
     size_limit = (mb_limit - recoil_mbsize) * 1024 ** 2
@@ -219,21 +221,17 @@ def search_to_split_videos(df, mb_limit, duration_limit='00:00:00.00'):
                                          size_limit=size_limit,
                                          duration_limit=duration_limit)
 
-    folder_script_path = get_folder_script_path()
-    output_folder_path = os.path.join(folder_script_path, 'videos_splitted')
-    exclude_all_files_from_folder(output_folder_path)
-
+    exclude_all_files_from_folder(path_folder_videos_splitted)
     for dict_path_file_mb_limit in list_dict_path_file_mb_limit:
-        file_path = dict_path_file_mb_limit['file_path']
+        file_path = dict_path_file_mb_limit['path_file']
         mb_limit = dict_path_file_mb_limit['mb_limit']
         float_duration_sec = dict_path_file_mb_limit['float_duration_sec']
         list_filepath_output = \
             split_mp4(largefile_path=file_path,
                       recoil=recoil_sec,
+                      output_folder_path=path_folder_videos_splitted,
                       mb_limit=mb_limit,
-                      output_folder_path=output_folder_path,
                       original_video_duration_sec=float_duration_sec)
-
         df = update_df_files(df=df, file_path_origin=file_path,
                              list_filepath_output=list_filepath_output)
     return df

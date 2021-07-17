@@ -223,9 +223,9 @@ def get_duration(file_path):
 
     #TODO use ffprobe_micro
     result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
-                                "format=duration", "-of",
-                                "default=noprint_wrappers=1:nokey=1",
-                                file_path],
+                             "format=duration", "-of",
+                             "default=noprint_wrappers=1:nokey=1",
+                             file_path],
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT)
     stdout = result.stdout
@@ -233,13 +233,13 @@ def get_duration(file_path):
     if 'non-existing SPS' in str(stdout):
         str_stdout = str(stdout)
         logging.info('result_stdout are string: ' +
-                        f'{str_stdout} | {file_path}')
+                     f'{str_stdout} | {file_path}')
         result_stdout = str_stdout.split(r'\r')[0]
         result_stdout = result_stdout.replace("b'", "")
     return float(result_stdout)
 
 
-def join_mp4(list_file_path, file_name_output):
+def join_mp4(list_file_path, file_name_output, path_folder_cache):
     """join a list of video path_file with mp4 extension
 
     Args:
@@ -252,9 +252,9 @@ def join_mp4(list_file_path, file_name_output):
                                         format="hh:mm:ss.ms"
     """
 
-    def exclude_temp_files(folder_script_path):
+    def exclude_temp_files(path_folder_cache):
 
-        dir_ts = os.path.join(folder_script_path, 'ts', '*')
+        dir_ts = os.path.join(path_folder_cache, '*')
         r = glob.glob(dir_ts)
         for i in r:
             os.remove(i)
@@ -274,17 +274,15 @@ def join_mp4(list_file_path, file_name_output):
     list_path_file_name_ts = []
     logging.info('Convert files to TS: ')
 
-    folder_script_path_relative = os.path.dirname(__file__)
-    folder_script_path = os.path.realpath(folder_script_path_relative)
-    exclude_temp_files(folder_script_path)
+    exclude_temp_files(path_folder_cache)
 
     list_dict_videos_duration = []
 
     for index, file_path in enumerate(list_file_path):
-        logging.info(f'"{index+1}.ts" from "{file_path}"')
+
         file_name_ts = f'{index+1}.ts'
-        path_file_name_ts = os.path.join(
-            folder_script_path, 'ts', file_name_ts)
+        path_file_name_ts = os.path.join(path_folder_cache, file_name_ts)
+        logging.info(f'"{index+1}.ts" from "{file_path}", to "{path_file_name_ts}"')
         os.system("ffmpeg -i " + '"' + file_path + '"' +
                   " -c copy -bsf:v h264_mp4toannexb -f mpegts " +
                   path_file_name_ts)
@@ -308,97 +306,5 @@ def join_mp4(list_file_path, file_name_output):
                 f"{file_name_output}"
 
     os.system(stringa)
-    exclude_temp_files(folder_script_path)
+    exclude_temp_files(path_folder_cache)
     return list_dict_videos_duration
-
-
-def get_video_details(filepath):
-
-    folder_script_path_relative = os.path.dirname(__file__)
-    folder_script_path = os.path.realpath(folder_script_path_relative)
-    file_temp = os.path.join(folder_script_path, 'detail.txt')
-
-    # create temp file
-    open(file_temp, 'a').close()
-
-    # open temp file
-    tmpf = open(file_temp, 'r', encoding='utf-8')
-
-    # fill temp file with video metadata using ffmpeg
-    os.system("ffmpeg -i \"%s\" 2> %s" % (filepath, file_temp))
-
-    # read temp file
-    lines = tmpf.readlines()
-
-    # close temp file
-    tmpf.close()
-
-    # delete temp file
-    # os.remove(file_temp)
-
-    # parse content
-    metadata = {}
-    for l in lines:
-        l = l.strip()
-        if l.startswith('Duration'):
-            metadata['duration'] = re.search(
-                'Duration: (.*?),', l).group(0).split(':', 1)[1].strip(' ,')
-            try:
-                metadata['bitrate'] = \
-                    re.search(
-                        "bitrate: (\d+ kb/s)",
-                        l).group(0).split(':')[1].strip()
-            except:
-                # .webm videos with encode Lavf56.40.101,
-                # may has 'Duration: N/A, start: -0.007000, bitrate: N/A'
-                metadata['bitrate'] = ''
-
-        if 'Video: ' in l:
-            if 'video' in metadata:
-                # if has another line of 'Video: ', possible of screens,
-                #  ignore. e.g:
-                #   Stream #0:2: Video: bmp, bgra, 640x360, 90k tbr, 90k tbn,
-                #    90k tbc (attached pic)
-                continue
-            metadata['video'] = {}
-            metadata['video']['codec'], metadata['video']['profile'] = \
-                [e.strip(' ,()') for e in re.search(
-                    'Video: (.*? \(.*?\)),? ',
-                    l).group(0).split(':')[1].split('(')]
-
-            metadata['video']['resolution'] = re.search(
-                '([1-9]\d+x\d+)', l).group(1)
-
-            try:
-                metadata['video']['bitrate'] = re.search(
-                    '(\d+ kb/s)', l).group(1)
-            except:
-                # .webm videos with encode Lavf56.40.101,
-                #  may has 'Video:
-                #   vp9 (Profile 0), yuv420p(tv, bt709/unknown/unknown)'
-                metadata['video']['bitrate'] = ''
-            try:
-                metadata['video']['fps'] = re.search('(\d+ fps)', l).group(1)
-            except:
-                metadata['video']['fps'] = ''
-
-        if 'Audio: ' in l:
-            metadata['audio'] = {}
-            metadata['audio']['codec'] = re.search('Audio: (.*?) ', l).group(1)
-            metadata['audio']['frequency'] = re.search(
-                ', (.*? Hz),', l).group(1)
-            try:
-                metadata['audio']['bitrate'] = re.search(
-                    ', (\d+ kb/s)', l).group(1)
-            except:
-                # .webm videos with encode Lavf56.40.101,
-                #  may has 'Audio: opus, 48000 Hz, stereo, fltp (default)'
-                metadata['audio']['bitrate'] = ''
-
-    if 'audio' not in metadata:
-        metadata['audio'] = {}
-        metadata['audio']['codec'] = ''
-        metadata['audio']['frequency'] = ''
-        metadata['audio']['bitrate'] = ''
-
-    return metadata
