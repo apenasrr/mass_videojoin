@@ -4,6 +4,17 @@ import pandas as pd
 import natsort
 
 
+def check_col_unique_values(serie):
+
+    serie_unique = serie.drop_duplicates(keep='first')
+    list_unique_values = serie_unique.unique().tolist()
+    qt_unique_values = len(list_unique_values)
+    if qt_unique_values == 1:
+        return True
+    else:
+        return False
+
+
 def sort_human(list_):
 
     list_ = natsort.natsorted(list_)

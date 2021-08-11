@@ -16,7 +16,8 @@ from utils_mass_videojoin import (exclude_all_files_from_folder,
                                   get_folder_script_path,
                                   time_is_hh_mm_ss_ms,
                                   sort_human,
-                                  sort_df_column_from_list)
+                                  sort_df_column_from_list,
+                                  check_col_unique_values)
 from video_tools import join_mp4, get_duration, \
                         timedelta_to_string, float_seconds_to_string, \
                         float_seconds_from_string
@@ -71,22 +72,73 @@ def df_sort_human(df, key_column_name):
     return df
 
 
-def get_video_details_with_group(df):
+def get_serie_sub_folder(serie_folder_path):
+
+    def get_df_sub_folders(serie_folder_path):
+        df = serie_folder_path.str.split('\\', expand=True)
+        len_cols = len(df.columns)
+        list_n_col_to_delete = []
+        for n_col in range(len_cols-1):
+            serie = df.iloc[:, n_col]
+            # check for column with more than 1 unique value (folder root)
+            col_has_one_unique_value = check_col_unique_values(serie)
+            if col_has_one_unique_value:
+                name_col = df.columns[n_col]
+                list_n_col_to_delete.append(name_col)
+
+        df = df.drop(list_n_col_to_delete, axis=1)
+        return df
+
+    df_sub_folders = get_df_sub_folders(serie_folder_path)
+    serie_first_column = df_sub_folders.iloc[:, 0]
+    return serie_first_column
+
+
+def set_mark_group_encode(df):
 
     df['key_join_checker'] = df['audio_codec'] + '-' + \
         df['video_codec'] + '-' + \
         df['video_resolution_width'].astype(str) + '-' + \
         df['video_resolution_height'].astype(str)
+    serie_group_encode_bool = (
+        df['key_join_checker'] != df['key_join_checker'].shift(1))
+    return serie_group_encode_bool
 
-    # set group_encode
-    df['group_encode'] = 1
-    for index, row in df.iterrows():
-        if index > 0:
-            group_encode_value_prev = df.loc[index-1, 'group_encode']
-            if row['key_join_checker'] != df.loc[index-1, 'key_join_checker']:
-                df.loc[index, 'group_encode'] = group_encode_value_prev + 1
-            else:
-                df.loc[index, 'group_encode'] = group_encode_value_prev
+
+def set_mask_group_per_folder(serie_folder_path):
+
+    serie_first_column = get_serie_sub_folder(serie_folder_path)
+    df_first_column = serie_first_column.to_frame('folder')
+    df_first_column['folder_prior'] = df_first_column['folder'].shift(1)
+    serie_change_folder_bool = (
+        df_first_column['folder_prior'] != df_first_column['folder'])
+    return serie_change_folder_bool
+
+
+def get_serie_group(serie_change_bool):
+    """
+    from boolean serie, make cumulative sum returning serie int
+    true, false, false, true, false
+    1, 1, 1, 2, 2
+    """
+
+    return serie_change_bool.cumsum()
+
+
+def get_video_details_with_group(df):
+
+    # set mask group per encode
+    serie_group_encode_bool = set_mark_group_encode(df)
+
+    # set mask group per folder
+    serie_folder_path = df['file_path_folder_origin']
+    serie_change_folder_bool = set_mask_group_per_folder(serie_folder_path)
+
+    # agregate group masks
+    serie_change_bool = serie_group_encode_bool | serie_change_folder_bool
+
+    # create group_encode column
+    df['group_encode'] = get_serie_group(serie_change_bool)
     return df
 
 
@@ -421,8 +473,8 @@ def correct_duration(path_file_report):
 
     logging.info('Correcting duration metadata...')
 
-    #TODO: set cache folder
-    # ensure folder ts in project folder
+    # set cache folder
+    # ensure folder cache in project folder
     project_dir_path = os.path.dirname(path_file_report)
     project_ts_dir_path = os.path.join(project_dir_path, 'cache')
     ensure_folder_existence([project_ts_dir_path])
@@ -839,7 +891,7 @@ def get_path_dir(path_dir):
     return path_dir
 
 
-def  get_path_file_report(path_file_report, path_dir):
+def get_path_file_report(path_file_report, path_dir):
 
     if path_file_report is None:
         path_file_report = set_path_file_report(path_dir)

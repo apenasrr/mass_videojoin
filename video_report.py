@@ -8,7 +8,12 @@ import pandas as pd
 def get_duration_ffprobe(dict_inf):
 
     d = {}
-    file = dict_inf['format']['filename']
+    try:
+        file = dict_inf['format']['filename']
+    except Exception as e:
+        print(f'\n{dict_inf}')
+        print(f'\n{e}')
+        return False
     try:
         duration_unformat = dict_inf['format']['duration']
         duration = video_tools.float_seconds_to_string(float_sec=float(duration_unformat))
@@ -24,95 +29,76 @@ def get_duration_ffprobe(dict_inf):
     return d
 
 
-def get_video_codec(dict_inf, is_video):
+def get_video_codec(stream_video):
 
-    if is_video:
-        video_codec = dict_inf['streams'][0]['codec_name']
-    else:
-        file = dict_inf['format']['filename']
-        logging.error("File above don't have tag 'video' in " +
-                      f'detail file:\n{file}')
-        video_codec = ''
+    video_codec = stream_video['codec_name']
     return video_codec
 
 
-def get_video_profile(dict_inf, is_video):
+def get_video_profile(stream_video):
 
-    if is_video:
-        video_profile = dict_inf['streams'][0]['profile']
-    else:
-        file = dict_inf['format']['filename']
-        logging.error("File above don't have tag 'video' in " +
-                      f'detail file:\n{file}')
-        video_profile = ''
+    video_profile = stream_video['profile']
     return video_profile
 
 
-def get_video_resolution_height(dict_inf, is_video):
+def get_video_resolution_height(stream_video):
 
-    if is_video:
-        video_resolution_height = dict_inf['streams'][0]['height']
-    else:
-        file = dict_inf['format']['filename']
-        logging.error("File above don't have tag 'video' in " +
-                      f'detail file:\n{file}')
-        video_resolution_height = ''
+    video_resolution_height = stream_video['height']
     return video_resolution_height
 
 
-def get_video_resolution_width(dict_inf, is_video):
+def get_video_resolution_width(stream_video):
 
-    if is_video:
-        video_resolution_width = dict_inf['streams'][0]['width']
-    else:
-        file = dict_inf['format']['filename']
-        logging.error("File above don't have tag 'video' in " +
-                      f'detail file:\n{file}')
-        video_resolution_width = ''
+    video_resolution_width = stream_video['width']
     return video_resolution_width
 
 
-def get_video_bitrate(dict_inf, is_video):
+def get_video_bitrate(dict_inf, stream_video):
+    """Bitrate search. It may be in one of the 2 possible places.
 
-    if is_video:
-        video_bitrate = dict_inf['streams'][0]['bit_rate']
-    else:
-        file = dict_inf['format']['filename']
-        logging.error("File above don't have tag 'video' in " +
-                      f'detail file:\n{file}')
-        video_bitrate = ''
+    Args:
+        dict_inf (dict): video metadata
+        stream_video (dict): video stream data
+
+    Raises:
+        NameError: If Bitrate is not found in any of the possible places
+
+    Returns:
+        int: video bitrate
+    """
+
+    try:
+        video_bitrate = stream_video['bit_rate']
+    except Exception as e:
+        try:
+            video_bitrate = dict_inf['format']['bit_rate']
+        except Exception as e:
+            print(f'{e}\n{dict_inf}')
+            file = dict_inf['format']['filename']
+            msg_err = "File bellow don't have 'bit_rate' in " + \
+                        f'detail file:\n{file}'
+            logging.error(msg_err)
+            raise NameError(msg_err)
+
     return int(video_bitrate)
 
 
-def get_is_avc(dict_inf, is_video):
+def get_is_avc(stream_video):
 
-    file = dict_inf['format']['filename']
-    if is_video:
-        try:
-            is_avc_str = dict_inf['streams'][0]['is_avc']
-            if is_avc_str == 'true':
-                is_avc = 1
-            else:
-                is_avc = 0
-        except:
-            logging.error('File above dont have tag "is_avc" in ' +
-                          f'ffprobe output:\n{file}')
-    else:
-        logging.error("File above don't have tag 'video' in " +
-                      f'detail file:\n{file}')
+    try:
+        is_avc_str = stream_video['is_avc']
+        if is_avc_str == 'true':
+            is_avc = 1
+        else:
+            is_avc = 0
+    except:
         is_avc = 0
     return is_avc
 
 
-def get_audio_codec(dict_inf, is_audio):
+def get_audio_codec(stream_audio):
 
-    if is_audio:
-        audio_codec = dict_inf['streams'][1]['codec_name']
-    else:
-        file = dict_inf['format']['filename']
-        logging.error('File above dont have tag "audio" in ' +
-                      f'detail file:\n{file}')
-        audio_codec = ''
+    audio_codec = stream_audio['codec_name']
     return audio_codec
 
 
@@ -121,7 +107,8 @@ def get_list_path_video(path_dir, video_extensions):
     # To input more file video extension:
     #  https://dotwhat.net/type/video-movie-files
 
-    tuple_video_extension = tuple(video_extensions)
+    tuple_video_extension_raw = tuple(video_extensions)
+    tuple_video_extension = tuple('.' + ext for ext in tuple_video_extension_raw)
     str_tuple_video_extension = ', '.join(tuple_video_extension)
     logging.info(f'Find for video with extension: {str_tuple_video_extension}')
     list_file_selected = []
@@ -157,31 +144,53 @@ def gen_report(list_dict_inf_ffprobe):
     for dict_file in list_dict_inf_ffprobe:
 
         path_file = dict_file['path_file']
+        print(f'parsing: {path_file}')
+        # path_file = dict_inf_ffprobe['format']['filename']
         dict_inf_ffprobe = dict_file['metadata']
         # parse data
         duration_dict = get_duration_ffprobe(dict_inf=dict_inf_ffprobe)
+        if duration_dict is False:
+            print('!File seems corrupt.\n')
+            continue
         duration = duration_dict['duration_str']
         duration_seconds = duration_dict['duration_seconds']
         total_bitrate = int(dict_inf_ffprobe['format']['bit_rate'])
 
-        is_video = dict_inf_ffprobe['streams'][0]['codec_type'] == 'video'
+        is_video = False
+        for stream in dict_inf_ffprobe['streams']:
+            if stream['codec_type'] == 'video':
+                stream_video = stream
+                is_video = True
+                break
+
         if is_video:
-            video_codec = get_video_codec(dict_inf_ffprobe, is_video)
-            video_profile = get_video_profile(dict_inf_ffprobe, is_video)
+            video_codec = get_video_codec(stream_video)
+            video_profile = get_video_profile(stream_video)
             video_resolution_height = \
-                get_video_resolution_height(dict_inf_ffprobe, is_video)
+                get_video_resolution_height(stream_video)
             video_resolution_width = \
-                get_video_resolution_width(dict_inf_ffprobe, is_video)
-            video_bitrate = get_video_bitrate(dict_inf_ffprobe, is_video)
-            is_avc = get_is_avc(dict_inf_ffprobe, is_video)
+                get_video_resolution_width(stream_video)
+            video_bitrate = get_video_bitrate(dict_inf_ffprobe, stream_video)
+            is_avc = get_is_avc(stream_video)
         else:
             logging.error("File above don't have tag 'video' in " +
                           f'detail file:\n{path_file}')
             continue
 
-        has_audio = dict_inf_ffprobe['streams'][1]['codec_type'] == 'audio'
+        has_audio = False
+        for stream in dict_inf_ffprobe['streams']:
+            if stream['codec_type'] == 'audio':
+                stream_audio = stream
+                has_audio = True
+                break
+
+        if has_audio is False:
+            logging.info("File above don't have tag 'audio' in " +
+                         f'detail file:\n{path_file}')
+            has_audio = False
+
         if has_audio:
-            audio_codec = get_audio_codec(dict_inf_ffprobe, has_audio)
+            audio_codec = get_audio_codec(stream_audio)
         else:
             audio_codec = ''
 

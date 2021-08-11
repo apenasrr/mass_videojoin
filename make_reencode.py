@@ -28,7 +28,8 @@ def logging_config():
     logging.getLogger('').addHandler(console)
 
 
-def get_file_name_dest(file_folder_origin, file_name_origin, prefix):
+def get_file_name_dest(file_folder_origin, file_name_origin,
+                       prefix, file_extension=None):
     """
     Create a hashed file name dest.
     Template: reencode_{file_name_origin}_{hash}.mp4"
@@ -38,8 +39,11 @@ def get_file_name_dest(file_folder_origin, file_name_origin, prefix):
     hash = hashlib.md5(file_folder_origin_encode).hexdigest()[:5]
     file_name_origin_without_extension = \
         os.path.splitext(file_name_origin)[0]
-    file_extension = \
-        os.path.splitext(file_name_origin)[1]
+    if file_extension == None:
+        file_extension = \
+            os.path.splitext(file_name_origin)[1]
+    else:
+        file_extension = '.' + file_extension
 
     file_name_dest = prefix + \
                      file_name_origin_without_extension + '_' + \
@@ -112,7 +116,7 @@ def reencode_video(dict_, path_folder_encoded):
                                     file_name_origin)
     # TODO: change to param path_folder
     file_name_dest = get_file_name_dest(file_folder_origin,
-                                        file_name_origin, 'reencode_')
+                                        file_name_origin, 'reencode_', 'mp4')
 
     path_folder_dest = path_folder_encoded
     path_file_dest = os.path.join(path_folder_dest,
@@ -133,8 +137,9 @@ def ask_for_delete_old_videos_encode(path_folder_encoded):
 
     len_list_file_name_encoded = len(list_file_name_encoded)
     if len_list_file_name_encoded > 0:
-        print('\nThere is files in videos_encoded folder.\n' +
-                'Do you wish delete them?')
+        print(f'\n{path_folder_encoded}\n' +
+              'There is files in videos_encoded folder.\n' +
+              'Do you wish delete them?')
         answer_delete = input('(None for yes) Answer: ')
 
         if answer_delete == '':
@@ -160,7 +165,7 @@ def update_file_report(path_file_report, dict_video_data, path_folder_encoded):
     path_file_origin = os.path.join(file_folder_origin,
                                     file_name_origin)
     file_name_dest = get_file_name_dest(file_folder_origin,
-                                        file_name_origin, 'reencode_')
+                                        file_name_origin, 'reencode_', 'mp4')
     path_folder_dest = path_folder_encoded
     path_file_dest = os.path.join(path_folder_dest,
                                   file_name_dest)
@@ -196,6 +201,10 @@ def update_file_report(path_file_report, dict_video_data, path_folder_encoded):
     df.loc[index_video, 'file_size'] = file_size
     df.loc[index_video, 'video_resolution'] = \
         video_resolution_to_change
+    df.loc[index_video, 'video_resolution_width'] = \
+        video_resolution_to_change.split('x')[0]
+    df.loc[index_video, 'video_resolution_height'] = \
+        video_resolution_to_change.split('x')[1]
 
     # get video metadata
     dict_inf_ffprobe={}
