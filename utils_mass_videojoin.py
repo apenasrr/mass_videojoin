@@ -1,7 +1,47 @@
-import os
 import glob
-import pandas as pd
 import natsort
+import os
+import pandas as pd
+import unidecode
+
+
+def normalize_string(string_actual):
+    """Replace letters with accent for letter without accent.
+    Strip accents from characters.
+    e.g.: Módulo Fácil -> Modulo Facil
+
+    Args:
+        string_actual (str): string to be normalized
+
+    Returns:
+        [str]: string normalized
+    """
+
+    string_norm = unidecode.unidecode(string_actual)
+
+    return string_norm
+
+
+def get_serie_sub_folder(serie_folder_path):
+
+    def get_df_sub_folders(serie_folder_path):
+        df = serie_folder_path.str.split('\\', expand=True)
+        len_cols = len(df.columns)
+        list_n_col_to_delete = []
+        for n_col in range(len_cols-1):
+            serie = df.iloc[:, n_col]
+            # check for column with more than 1 unique value (folder root)
+            col_has_one_unique_value = check_col_unique_values(serie)
+            if col_has_one_unique_value:
+                name_col = df.columns[n_col]
+                list_n_col_to_delete.append(name_col)
+
+        df = df.drop(list_n_col_to_delete, axis=1)
+        return df
+
+    df_sub_folders = get_df_sub_folders(serie_folder_path)
+    serie_first_column = df_sub_folders.iloc[:, 0]
+    return serie_first_column
 
 
 def check_col_unique_values(serie):

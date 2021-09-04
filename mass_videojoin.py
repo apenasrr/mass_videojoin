@@ -5,28 +5,32 @@
     A smart tool to optimize and make turbo join in a massive video collection
 """
 
-import os
-import pandas as pd
+from configparser import ConfigParser
 import datetime
 import logging
-import unidecode
+import os
+import pandas as pd
 import sys
+import unidecode
+
+from transition import check_transition_resolution, \
+                       get_video_resolution_format, \
+                       get_dict_transition_resolution
 from utils_mass_videojoin import (exclude_all_files_from_folder,
                                   create_report_backup,
                                   get_folder_script_path,
                                   time_is_hh_mm_ss_ms,
                                   sort_human,
                                   sort_df_column_from_list,
-                                  check_col_unique_values)
+                                  check_col_unique_values,
+                                  get_serie_sub_folder,
+                                  normalize_string)
 from video_tools import join_mp4, get_duration, \
                         timedelta_to_string, float_seconds_to_string, \
                         float_seconds_from_string
-from transition import check_transition_resolution, \
-                       get_video_resolution_format, \
-                       get_dict_transition_resolution
-import make_reencode
 from make_split import search_to_split_videos
-from configparser import ConfigParser
+from prefill_reencode_plan import prefill_reencode_plan
+import make_reencode
 import video_report
 import json
 
@@ -66,32 +70,14 @@ def df_sort_human(df, key_column_name):
     :return: DataFrame. Sort in a human way by [file_path_folder, file_name]
     """
 
-    list_path_file = df[key_column_name].tolist()
+    key_column_name_norm = key_column_name + '_norm'
+    df[key_column_name_norm] = df[key_column_name].apply(normalize_string)
+    list_path_file = df[key_column_name_norm].tolist()
     sorter = sort_human(list_path_file)
-    df = sort_df_column_from_list(df, key_column_name, sorter)
+    df = sort_df_column_from_list(df, key_column_name_norm, sorter)
+    df.drop([key_column_name_norm], 1, inplace=True)
+    df = df.reset_index()
     return df
-
-
-def get_serie_sub_folder(serie_folder_path):
-
-    def get_df_sub_folders(serie_folder_path):
-        df = serie_folder_path.str.split('\\', expand=True)
-        len_cols = len(df.columns)
-        list_n_col_to_delete = []
-        for n_col in range(len_cols-1):
-            serie = df.iloc[:, n_col]
-            # check for column with more than 1 unique value (folder root)
-            col_has_one_unique_value = check_col_unique_values(serie)
-            if col_has_one_unique_value:
-                name_col = df.columns[n_col]
-                list_n_col_to_delete.append(name_col)
-
-        df = df.drop(list_n_col_to_delete, axis=1)
-        return df
-
-    df_sub_folders = get_df_sub_folders(serie_folder_path)
-    serie_first_column = df_sub_folders.iloc[:, 0]
-    return serie_first_column
 
 
 def set_mark_group_encode(df):
@@ -597,96 +583,6 @@ def get_folder_name_normalized(path_dir):
     return dir_name_normalize
 
 
-def prefill_video_resolution_to_change(df):
-    """identify the main profile that has 'audiocodec aac' and
-        'videocodec libx264'
-    Args:
-        df (dataframe): with keys: [audio_codec, video_codec,
-                                    video_resolution, duration_seconds, is_avc]
-
-    Returns:
-        [dataframe]: Add column 'video_resolution_to_change' filled
-    """
-
-    # identify the main profile that has 'audiocodec aac' and
-    #  'videocodec libx264'
-    # create aux column 'key_join_checker'
-    df['key_join_checker'] = df['audio_codec'] + '-' + \
-                             df['video_codec'] + '-' + \
-                             df['video_resolution_width'].astype(str) + 'x' + \
-                             df['video_resolution_height'].astype(str)
-
-    df_key = df[['key_join_checker',
-                 'duration_seconds',
-                 'is_avc',
-                 'video_resolution_width',
-                 'video_resolution_height']].copy()
-
-    # add col duration_min
-    df_key['duration_min'] = df_key['duration_seconds']/60
-    df_key.drop('duration_seconds', axis=1, inplace=True)
-
-    # create a summary dataframe to show sum duration per video profile
-    df_key_agg = df_key.groupby(['key_join_checker',
-                                 'video_resolution_width',
-                                 'video_resolution_height',
-                                 'is_avc'])['duration_min'].agg('sum')
-    # convert in dataframe
-    df_key_agg = df_key_agg.reset_index()
-    # sort dataframe
-    df_key_agg = df_key_agg.sort_values(['duration_min'], ascending=[False])
-
-    # show table result formated
-    df_key_agg_to_show = df_key_agg.copy()
-    df_key_agg_to_show['duration_min'] = \
-        df_key_agg_to_show['duration_min'].round(1)
-    print('\n', df_key_agg_to_show.to_string(index=False))
-
-    # find 'index_max'
-    index_max = df_key_agg['duration_min'].idxmax()
-
-    # find 'key_join_main'
-    key_join_main = df_key_agg.loc[index_max, 'key_join_checker']
-
-    # show quantity of minutes to reencode
-    print(f'The main profile is "{key_join_main}"')
-
-    # find 'video_resolution_main'
-    video_resolution_main = \
-        df_key_agg.loc[index_max,
-                       ['video_resolution_width']][0].astype(str) + 'x' + \
-        df_key_agg.loc[index_max,
-                       ['video_resolution_height']][0].astype(str)
-
-    # show percentage of minutes to reencode
-    mask_to_convert_1 = ~df_key_agg.index.isin([index_max])
-    mask_to_convert_2 = ~df_key_agg['is_avc'].isin([1])
-    mask_to_convert = mask_to_convert_1 | mask_to_convert_2
-
-    minutes_to_reencode = \
-        df_key_agg.loc[mask_to_convert, 'duration_min'].sum()
-    minutes_total = df_key_agg['duration_min'].sum()
-    percent_to_reencode = minutes_to_reencode/minutes_total
-    #  the command ':.1f' fix 1 digit after decimal point
-    print(f'There is {minutes_to_reencode:.1f} minutes ' +
-          f'({percent_to_reencode*100:.0f}%) to reencode')
-
-    # in main dataframe
-    #  add column video_resolution_to_change and fill with main profile
-    #   with main profile 'video_resolution_main'
-    mask_resolution_to_change_1 = ~df['key_join_checker'].isin([key_join_main])
-    mask_resolution_to_change_2 = ~df['is_avc'].isin([1])
-    mask_resolution_to_change = mask_resolution_to_change_1 | \
-                                mask_resolution_to_change_2
-    df['video_resolution_to_change'] = ''
-    df.loc[mask_resolution_to_change,
-           'video_resolution_to_change'] = video_resolution_main
-
-    # remove aux column 'key_join_checker'
-    df.drop('key_join_checker', axis=1, inplace=True)
-    return df
-
-
 def save_metadata_json_files(list_dict_inf_ffprobe, path_file_report):
     """save in project_folder/metadata/ , the metadata of each video file
     in json format
@@ -729,11 +625,14 @@ def step_create_report_filled(path_dir, path_file_report, video_extensions):
 
     # sort path_file by natural human way
     df = df_sort_human(df, key_column_name='path_file')
+
     # prefill column video_resolution_to_change
-    df = prefill_video_resolution_to_change(df)
+    df = prefill_reencode_plan(df)
+
+    # save
     df.to_excel(path_file_report, index=False)
 
-    # Make backup
+    # Make backup. _origin
     create_report_backup(
         df=df, path_file_report=path_file_report, tag='origin')
 
