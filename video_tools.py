@@ -75,7 +75,9 @@ def change_width_height_mp4(path_file_video_origin, size_height,
 
     # for fix audio codec to aac | https://trac.ffmpeg.org/wiki/Encode/AAC
     stringa = f'ffmpeg -y -i "{path_file_video_origin}" ' + \
-              f'-vf scale={size_width}:{size_height},setsar=1:1 ' + \
+              f'-vf "scale=w={size_width}:h={size_height}:' + \
+              'force_original_aspect_ratio=1,' + \
+              f'pad={size_width}:{size_height}:(ow-iw)/2:(oh-ih)/2" ' + \
               '-c:v libx264 -preset ultrafast -flags +global_header ' + \
               '-pix_fmt yuv420p -profile:v baseline -movflags +faststart ' + \
               f'-maxrate {str_maxrate}k ' + \
