@@ -52,12 +52,10 @@ def get_row_number_from_filepath(df, file_path_origin):
 
 def delete_fileorigin(df, file_path_origin):
 
-    df.to_excel('df_delete_fileorigin.xlsx', index=False)
     row_number = get_row_number_from_filepath(df, file_path_origin)
 
     df = df.drop(df.index[[row_number]])
     df = df.reset_index(drop=True)
-    df.to_excel('df_delete_fileorigin_after.xlsx', index=False)
     return df
 
 

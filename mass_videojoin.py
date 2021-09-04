@@ -38,7 +38,7 @@ import json
 def logging_config():
 
     logfilename = 'log-' + 'mass_videojoin' + '.txt'
-    logging.basicConfig(filename=logfilename, level=logging.DEBUG,
+    logging.basicConfig(filename=logfilename, level=logging.INFO,
                         format=' %(asctime)s-%(levelname)s-%(message)s')
     # set up logging to console
     console = logging.StreamHandler()
@@ -202,7 +202,8 @@ def get_list_chunk_videos(df, max_size_mb, duration_limit='00:00:00.00'):
 def get_path_folder_cache(path_dir):
 
     dir_name_normalize = get_folder_name_normalized(path_dir)
-    folder_name = 'output_' + dir_name_normalize
+    folder_name = os.path.join('projects',
+                               'output_' + dir_name_normalize)
     ensure_folder_existence([folder_name])
 
     path_folder_cache = os.path.join(folder_name, 'cache')
@@ -716,7 +717,9 @@ def set_join_videos(path_file_report, mb_limit, filename_output,
 def set_path_file_report(path_dir):
 
     folder_name_normalized = get_folder_name_normalized(path_dir)
-    folder_path_output_relative = 'output_' + folder_name_normalized
+    folder_path_output_relative = \
+        os.path.join('projects',
+                     'output_' + folder_name_normalized)
     ensure_folder_existence([folder_path_output_relative])
     path_file_report = os.path.join(folder_path_output_relative,
                                     'video_details.xlsx')
@@ -726,7 +729,8 @@ def set_path_file_report(path_dir):
 def set_path_folder_videos_encoded(path_dir):
 
     dir_name_normalize = get_folder_name_normalized(path_dir)
-    folder_path_output_relative = 'output_' + dir_name_normalize
+    folder_path_output_relative = os.path.join('projects',
+                                               'output_' + dir_name_normalize)
     path_folder_videos_encoded = os.path.join(folder_path_output_relative,
                                               'videos_encoded')
     return path_folder_videos_encoded
@@ -735,7 +739,8 @@ def set_path_folder_videos_encoded(path_dir):
 def set_path_folder_videos_splitted(path_dir):
 
     dir_name_normalize = get_folder_name_normalized(path_dir)
-    folder_path_output_relative = 'output_' + dir_name_normalize
+    folder_path_output_relative = os.path.join('projects',
+                                               'output_' + dir_name_normalize)
     path_folder_videos_splitted = os.path.join(folder_path_output_relative,
                                                'videos_splitted')
     return path_folder_videos_splitted
@@ -744,7 +749,8 @@ def set_path_folder_videos_splitted(path_dir):
 def set_path_folder_videos_joined(path_dir):
 
     dir_name_normalize = get_folder_name_normalized(path_dir)
-    folder_path_output_relative = 'output_' + dir_name_normalize
+    folder_path_output_relative = os.path.join('projects',
+                                               'output_' + dir_name_normalize)
     path_folder_videos_joined = os.path.join(folder_path_output_relative,
                                              'output_videos')
     return path_folder_videos_joined
@@ -753,9 +759,10 @@ def set_path_folder_videos_joined(path_dir):
 def set_path_folder_videos_cache(path_dir):
 
     dir_name_normalize = get_folder_name_normalized(path_dir)
-    folder_path_output_relative = 'output_' + dir_name_normalize
+    folder_path_output_relative = os.path.join('projects',
+                                               'output_' + dir_name_normalize)
     path_folder_videos_cache = os.path.join(folder_path_output_relative,
-                                               'cache')
+                                            'cache')
     return path_folder_videos_cache
 
 
@@ -811,15 +818,13 @@ def main():
     start_index = int(config_data['start_index'])
     path_file_report = None
     path_dir = None
-
+    ensure_folder_existence(['projects'])
     while True:
         menu_answer = menu_ask()
         if menu_answer == 1:
             # create Dataframe of video details
-
             path_dir = get_path_dir(path_dir)
             path_file_report = set_path_file_report(path_dir)
-
             step_create_report_filled(path_dir, path_file_report,
                                       video_extensions)
 
