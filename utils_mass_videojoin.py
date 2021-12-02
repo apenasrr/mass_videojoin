@@ -3,6 +3,30 @@ import natsort
 import os
 import pandas as pd
 import unidecode
+import hashlib
+
+
+def get_file_name_dest(file_folder_origin, file_name_origin,
+                       prefix, file_extension=None):
+    """
+    Create a hashed file name dest.
+    Template: reencode_{file_name_origin}_{hash}.mp4"
+    """
+
+    file_folder_origin_encode = file_folder_origin.encode('utf-8')
+    hash = hashlib.md5(file_folder_origin_encode).hexdigest()[:5]
+    file_name_origin_without_extension = \
+        os.path.splitext(file_name_origin)[0]
+    if file_extension == None:
+        file_extension = \
+            os.path.splitext(file_name_origin)[1]
+    else:
+        file_extension = '.' + file_extension
+
+    file_name_dest = prefix + \
+                     file_name_origin_without_extension + '_' + \
+                     hash + file_extension
+    return file_name_dest
 
 
 def normalize_string(string_actual):

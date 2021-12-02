@@ -9,6 +9,7 @@ import re
 import glob
 import subprocess
 from datetime import timedelta
+from utils_mass_videojoin import get_file_name_dest
 
 
 def get_video_resolution(file_path):
@@ -111,6 +112,7 @@ def split_mp4(largefile_path, recoil, output_folder_path, mb_limit=0,
     :input: recoil: Int. Seconds add to initial 'part 2' to prevent lost frames
     :input: time_split_sec: Int. Moment in seconds where the video must be cut
     :input: mb_limit: Int. File size limit per slice in megabyte.
+    :input: original_video_duration_sec: optional. Int. Duration of origin video
     """
 
     # The second slice needs to start seconds before cutting
@@ -133,8 +135,14 @@ def split_mp4(largefile_path, recoil, output_folder_path, mb_limit=0,
         print('split_mp4: Inform variable mb_limit.')
         return False
 
+    file_folder = file_name = os.path.split(largefile_path)[0]
     file_name = os.path.split(largefile_path)[1]
-    file_name_without_extension = os.path.splitext(file_name)[0]
+
+    file_name_hashed = get_file_name_dest(file_folder_origin=file_folder,
+                                          file_name_origin=file_name,
+                                          prefix='split_')
+
+    file_name_without_extension = os.path.splitext(file_name_hashed)[0]
     file_size = os.stat(largefile_path).st_size
     limit_size = mb_limit * 1024 ** 2
     slices_qt = file_size // limit_size + 1
@@ -167,9 +175,9 @@ def split_mp4(largefile_path, recoil, output_folder_path, mb_limit=0,
         list_filepath_output.append(filepath_output)
 
         stringa = f'ffmpeg -i "{largefile_path}" ' +\
-            f'{time_start_string}' +\
-            f'{duration_string}' +\
-            f'-c copy "{filepath_output}"'
+                  f'{time_start_string}' +\
+                  f'{duration_string}' +\
+                  f'-c copy "{filepath_output}"'
         os.system(stringa)
 
     # return a list with every filepath created

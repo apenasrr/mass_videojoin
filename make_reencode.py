@@ -1,13 +1,13 @@
-import pandas as pd
-import hashlib
 import logging
 import os
 import sys
+import video_report
+import pandas as pd
 from video_tools import change_width_height_mp4
 from utils_mass_videojoin import exclude_all_files_from_folder, \
-                                 create_report_backup
+                                 create_report_backup, \
+                                 get_file_name_dest
 from ffprobe_micro import ffprobe
-import video_report
 
 
 def logging_config():
@@ -26,29 +26,6 @@ def logging_config():
     console.setFormatter(formatter)
     # add the handler to the root logger
     logging.getLogger('').addHandler(console)
-
-
-def get_file_name_dest(file_folder_origin, file_name_origin,
-                       prefix, file_extension=None):
-    """
-    Create a hashed file name dest.
-    Template: reencode_{file_name_origin}_{hash}.mp4"
-    """
-
-    file_folder_origin_encode = file_folder_origin.encode('utf-8')
-    hash = hashlib.md5(file_folder_origin_encode).hexdigest()[:5]
-    file_name_origin_without_extension = \
-        os.path.splitext(file_name_origin)[0]
-    if file_extension == None:
-        file_extension = \
-            os.path.splitext(file_name_origin)[1]
-    else:
-        file_extension = '.' + file_extension
-
-    file_name_dest = prefix + \
-                     file_name_origin_without_extension + '_' + \
-                     hash + file_extension
-    return file_name_dest
 
 
 def create_backup_columns(df):
@@ -144,7 +121,7 @@ def ask_for_delete_old_videos_encode(path_folder_encoded):
 
         if answer_delete == '':
             confirm_delete = input('\nType Enter to delete all ' +
-                                    'video_encoded files.')
+                                   'video_encoded files.')
             if confirm_delete == '':
                 exclude_all_files_from_folder(path_folder_encoded)
             else:
@@ -207,7 +184,7 @@ def update_file_report(path_file_report, dict_video_data, path_folder_encoded):
         video_resolution_to_change.split('x')[1]
 
     # get video metadata
-    dict_inf_ffprobe={}
+    dict_inf_ffprobe = {}
     inf_ffprobe = ffprobe(path_file_dest).get_output_as_dict()
     dict_inf_ffprobe['path_file'] = path_file_dest
     dict_inf_ffprobe['metadata'] = inf_ffprobe
