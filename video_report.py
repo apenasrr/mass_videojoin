@@ -5,30 +5,6 @@ import os
 import pandas as pd
 
 
-def get_duration_ffprobe(dict_inf):
-
-    d = {}
-    try:
-        file = dict_inf['format']['filename']
-    except Exception as e:
-        print(f'\n{dict_inf}')
-        print(f'\n{e}')
-        return False
-    try:
-        duration_unformat = dict_inf['format']['duration']
-        duration = video_tools.float_seconds_to_string(float_sec=float(duration_unformat))
-    except:
-        logging.error(f'Video without duration:\n{file}\n' +
-                        'Please check and delete the file if ' +
-                        'necessary')
-        d['duration_str'] = ''
-        d['duration_seconds'] = ''
-
-    d['duration_str'] = duration
-    d['duration_seconds'] = float(duration_unformat)
-    return d
-
-
 def get_video_codec(stream_video):
 
     video_codec = stream_video['codec_name']
@@ -148,7 +124,7 @@ def gen_report(list_dict_inf_ffprobe):
         # path_file = dict_inf_ffprobe['format']['filename']
         dict_inf_ffprobe = dict_file['metadata']
         # parse data
-        duration_dict = get_duration_ffprobe(dict_inf=dict_inf_ffprobe)
+        duration_dict = video_tools.get_duration_ffprobe(dict_inf=dict_inf_ffprobe)
         if duration_dict is False:
             print('!File seems corrupt.\n')
             continue

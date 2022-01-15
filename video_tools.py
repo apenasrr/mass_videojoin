@@ -9,6 +9,7 @@ import re
 import glob
 import subprocess
 from datetime import timedelta
+from ffprobe_micro import ffprobe
 from utils_mass_videojoin import get_file_name_dest
 
 
@@ -229,24 +230,37 @@ def float_seconds_from_string(str_hh_mm_ss_ms):
     return float_sec_timedelta
 
 
+def get_duration_ffprobe(dict_inf):
+
+    d = {}
+    try:
+        file = dict_inf['format']['filename']
+    except Exception as e:
+        print(f'\n{dict_inf}')
+        print(f'\n{e}')
+        return False
+    try:
+        duration_unformat = dict_inf['format']['duration']
+        duration = float_seconds_to_string(float_sec=float(duration_unformat))
+    except:
+        logging.error(f'Video without duration:\n{file}\n' +
+                        'Please check and delete the file if ' +
+                        'necessary')
+        d['duration_str'] = ''
+        d['duration_seconds'] = ''
+
+    d['duration_str'] = duration
+    d['duration_seconds'] = float(duration_unformat)
+    return d
+    
+    
 def get_duration(file_path):
 
-    #TODO use ffprobe_micro
-    result = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
-                             "format=duration", "-of",
-                             "default=noprint_wrappers=1:nokey=1",
-                             file_path],
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT)
-    stdout = result.stdout
-    result_stdout = stdout
-    if 'non-existing SPS' in str(stdout):
-        str_stdout = str(stdout)
-        logging.info('result_stdout are string: ' +
-                     f'{str_stdout} | {file_path}')
-        result_stdout = str_stdout.split(r'\r')[0]
-        result_stdout = result_stdout.replace("b'", "")
-    return float(result_stdout)
+    dict_inf_ffprobe = ffprobe(file_path).get_output_as_dict()
+    duration_dict = get_duration_ffprobe(dict_inf=dict_inf_ffprobe)
+    duration_seconds = duration_dict['duration_seconds']
+        
+    return float(duration_seconds)
 
 
 def join_mp4(list_file_path, file_name_output, path_folder_cache):
