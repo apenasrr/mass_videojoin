@@ -696,7 +696,7 @@ def step_create_report_filled(path_dir, path_file_report, video_extensions):
     # Make backup. _origin
     create_report_backup(df=df,
                          path_file_report=path_file_report,
-                         tag="origin")
+                         tag="1_origin")
 
 
 def set_make_reencode(path_file_report, path_folder_videos_encoded):
@@ -709,7 +709,7 @@ def set_make_reencode(path_file_report, path_folder_videos_encoded):
     # make backup
     create_report_backup(df=df,
                          path_file_report=path_file_report,
-                         tag="reencode")
+                         tag="2_reencode")
 
     print("\nReencode finished")
 
@@ -721,7 +721,7 @@ def set_correct_duration(path_file_report):
     # make backup
     create_report_backup(df=df,
                          path_file_report=path_file_report,
-                         tag="correct_duration")
+                         tag="3_correct_duration")
 
 
 def set_group_column(path_file_report):
@@ -752,7 +752,7 @@ def set_split_videos(
     # backup group, after adjusted manually
     create_report_backup(df=df,
                          path_file_report=path_file_report,
-                         tag="grouped")
+                         tag="4_grouped")
 
     # Find for file_video too big and split them
     df = search_to_split_videos(
@@ -763,7 +763,7 @@ def set_split_videos(
 
     create_report_backup(df=df,
                          path_file_report=path_file_report,
-                         tag="splited")
+                         tag="5_splited")
 
 
 def set_join_videos(
@@ -795,7 +795,7 @@ def set_join_videos(
     # backup joined
     create_report_backup(df=df,
                          path_file_report=path_file_report,
-                         tag="joined")
+                         tag="6_joined")
 
 
 def set_path_file_report(path_dir):

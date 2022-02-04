@@ -33,7 +33,21 @@ def logging_config():
     logging.getLogger("").addHandler(console)
 
 
-def create_backup_columns(df):
+def create_backup_metadata_columns(df):
+    """Saves the current state of the columns below,
+    adding the suffix "_origin":
+    ["file_path_folder",
+     "file_name",
+     "file_size",
+     "video_resolution_height",
+     "video_resolution_width]
+
+    Args:
+        df (dataframe): report dataframe
+
+    Returns:
+        dataframe: dataframe updated with columns backup
+    """
 
     # Ensure creation of column bellow
     list_backup_columns = (
@@ -53,21 +67,27 @@ def create_backup_columns(df):
 
 def get_next_video_to_reencode(path_file_report):
 
+    # load dataframe
     try:
         df = pd.read_excel(path_file_report, engine="openpyxl")
     except Exception as e:
         logging.error(f"Can't open file: {path_file_report}")
         logging.error(e)
+
+    # create mask to reencode
     mask_df_to_reencode = ~df["video_resolution_to_change"].isna()
     mask_df_reencode_not_done = df["reencode_done"].isin([0])
     mask_df_to_reencode = mask_df_to_reencode & mask_df_reencode_not_done
 
+    # filter df to reencode
     df_to_reencode = df.loc[mask_df_to_reencode, :]
 
+    # check if there is videos to reencode. Return False if note
     qt_videos_to_reencode = df_to_reencode.shape[0]
     if qt_videos_to_reencode == 0:
         return False
 
+    # get first line as dict
     df_to_reencode = df_to_reencode.reset_index(drop=True)
     dict_first_line = df_to_reencode.loc[0, :]
     return dict_first_line
@@ -229,12 +249,12 @@ def make_reencode(path_file_report, path_folder_videos_encoded):
     # Ensure creation of column 'reencode_done'.
     if "reencode_done" not in df.columns:
         df["reencode_done"] = 0
-        df = create_backup_columns(df)
+        df = create_backup_metadata_columns(df)
+        # Save reports
+        df.to_excel(path_file_report, index=False)
 
-    # Save reports
-    df.to_excel(path_file_report, index=False)
     create_report_backup(
-        df=df, path_file_report=path_file_report, tag="reencode"
+        df=df, path_file_report=path_file_report, tag="2_reencode"
     )
 
     need_reencode = True
@@ -247,15 +267,17 @@ def make_reencode(path_file_report, path_folder_videos_encoded):
             need_reencode = False
             continue
 
+        # run reencode
         dict_video_data = return_next_video_to_reencode
         return_reencode_video = reencode_video(
             dict_video_data, path_folder_encoded
         )
+        # if fails, terminate
         if return_reencode_video is False:
             sys.exit()
             return
 
-        # after reencode, update metadata in report, from new videos generated
+        # after reencode, update metadata in report, with new videos generated
         df = update_file_report(
             path_file_report, dict_video_data, path_folder_encoded
         )
@@ -263,6 +285,6 @@ def make_reencode(path_file_report, path_folder_videos_encoded):
         # Save reports
         df.to_excel(path_file_report, index=False)
         create_report_backup(
-            df=df, path_file_report=path_file_report, tag="reencode"
+            df=df, path_file_report=path_file_report, tag="2_reencode"
         )
     return df

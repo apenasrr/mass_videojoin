@@ -278,6 +278,8 @@ def get_duration_ffprobe(dict_inf):
     try:
         duration_unformat = dict_inf["format"]["duration"]
         duration = float_seconds_to_string(float_sec=float(duration_unformat))
+        d["duration_str"] = duration
+        d["duration_seconds"] = float(duration_unformat)
     except:
         logging.error(
             f"Video without duration:\n{file}\n"
@@ -287,8 +289,6 @@ def get_duration_ffprobe(dict_inf):
         d["duration_str"] = ""
         d["duration_seconds"] = ""
 
-    d["duration_str"] = duration
-    d["duration_seconds"] = float(duration_unformat)
     return d
 
 
