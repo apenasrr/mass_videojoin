@@ -19,7 +19,7 @@ import unidecode
 import make_reencode
 import video_report
 from make_split import search_to_split_videos
-from prefill_reencode_plan import prefill_reencode_plan
+from reencode_plan import prefill
 from transition import (check_transition_resolution,
                         get_dict_transition_resolution,
                         get_video_resolution_format)
@@ -77,7 +77,7 @@ def df_sort_human(df, key_column_name):
     list_path_file = df[key_column_name_norm].tolist()
     sorter = sort_human(list_path_file)
     df = sort_df_column_from_list(df, key_column_name_norm, sorter)
-    df.drop([key_column_name_norm], 1, inplace=True)
+    df = df.drop([key_column_name_norm], axis=1)
     df = df.reset_index()
     return df
 
@@ -221,8 +221,6 @@ def get_path_folder_cache(path_dir):
 
 def join_videos_process_df(
     df,
-    list_file_path,
-    file_name_output,
     list_dict_videos_duration,
     transition_effect=False,
 ):
@@ -232,8 +230,6 @@ def join_videos_process_df(
     Args:
         df (dataframe): video_details dataframe. Required columns:
                     file_path
-        list_file_path (list): list of original video files
-        file_name_output (string): file_name of joined video output
         list_dict_videos_duration (list):
             list of dicts, with keys:
                 file_path_origin (string). file_path of original video,
@@ -245,10 +241,6 @@ def join_videos_process_df(
         dataframe: dataframe updated with columns:
                     file_output, video_duration_real
     """
-
-    # add column file_output
-    mask_files_joined = df["file_path"].isin(list_file_path)
-    df.loc[mask_files_joined, "file_output"] = file_name_output
 
     # add column video_duration_real
     index_video_in_df = 0
@@ -358,14 +350,18 @@ def ensure_transitions(list_chunk_videos):
 def do_videos_join(
     list_file_path, file_path_output, path_folder_videos_cache,
 ):
-    """Gerar junção dos vídeos
+    """Process videos join from a list of video path
 
     Args:
-        list_file_path ([type]): [description]
+        list_file_path (list): list of video path
 
     Returns:
-        [type]: [description]
+        list: dict with keys: file_path_origin, duration_real
     """
+
+    # remove file_path_output if already exists
+    if os.path.exists(file_path_output):
+        os.remove(file_path_output)
 
     if len(list_file_path) == 1:
         # Block with 1 video is not necessary to join
@@ -386,7 +382,7 @@ def do_videos_join(
 
 
 def join_videos(
-    df,
+    file_path_report,
     max_size_mb,
     filename_output,
     path_folder_videos_joined,
@@ -398,8 +394,9 @@ def join_videos(
     """join videos according to column 'group_encode' in df dataframe
 
     Args:
-        df (dataframe): video_details dataframe. Required columns:
-                         file_dolder, file_name, group_encode
+        file_path_report (string): file path of video_details report.
+                                   Required columns:
+                                       [file_dolder, file_name, group_encode]
         max_size_mb (int): max size of each block of videos joined
         path_folder_videos_joined (str): destination path_folder
                                           for grouped videos
@@ -414,53 +411,127 @@ def join_videos(
                     [file_output, video_origin_duration_pre_join]
     """
 
-    df["file_path"] = df["file_path_folder"] + "\\" + df["file_name"]
-    list_chunk_videos = get_list_chunk_videos(df, max_size_mb, duration_limit)
+    def create_column_number_block_file_output(df,
+                                                list_chunk_videos,
+                                                start_index_output):
 
-    df["file_output"] = ""
+        for index, chunk_videos in enumerate(list_chunk_videos):
 
-    # crete copy before include transitions effect
-    list_chunk_videos_original = list_chunk_videos.copy()
+            mask = df["file_path"].isin(chunk_videos)
 
-    # make list_chunk_videos with transition effect
-    if transition_status:
-        ensure_transitions(list_chunk_videos)
-        # include transition_video between each file in list_chunk_videos
-        list_chunk_videos = transition_update_chunk_videos(list_chunk_videos)
+            # add column number_block
+            df.loc[mask, "number_block"] = index + start_index_output
 
-    for index, list_file_path in enumerate(list_chunk_videos):
-        # list_file_path will be joined
+            # add column file_output
+            file_count = index + start_index_output
+            file_name_output = f"{filename_output}-%03d.mp4" % file_count
+            file_path_output = os.path.join(path_folder_videos_joined,
+                                            file_name_output)
+            df.loc[mask, "file_output"] = file_path_output
 
-        file_count = index + start_index_output
-        file_name_output = f"{filename_output}-%03d.mp4" % file_count
-        file_path_output = os.path.join(path_folder_videos_joined, file_name_output)
+            # df.loc["file_path_output"] = os.path.abspath(file_path_output)
 
-        # TODO: test this new function
-        # Do videos join
-        list_dict_videos_duration = do_videos_join(
-            list_file_path, file_path_output, path_folder_videos_cache,
-        )
+        return df
+
+    def get_next_join_job(file_path_report):
+
+        # load dataframe
+        try:
+            df = pd.read_excel(file_path_report, engine="openpyxl")
+        except Exception as e:
+            logging.error(f"Can't open file: {file_path_report}")
+            logging.error(e)
+
+        # create mask to join
+        mask_df_to_join = df["join_done"].isin([0])
+
+        # filter df to join
+        df_to_join = df.loc[mask_df_to_join, :].reset_index(drop=True)
+        if df_to_join.shape[0] == 0:
+            return False
+
+        # check if there is videos to join. Return False if note
+        file_output = df_to_join.loc[0, "file_output"]
+
+        mask_job = df_to_join['file_output'].isin([file_output])
+        list_file_path = df_to_join.loc[mask_job, 'file_path'].to_list()
+
+        list_join_job = [file_output, list_file_path]
+
+        return list_join_job
+
+    def mark_join_job_done(df, file_output):
+
+        mask = df['file_output'].isin([file_output])
+        df.loc[mask, 'join_done'] = 1
+        return df
+
+    df = pd.read_excel(file_path_report, engine="openpyxl")
+
+    # if it's the first time running the join process
+    if "join_done" not in df.columns:
+        # Create columns: join_done, file_path, number_block, file_output
+        df['join_done'] = 0
+        df["file_path"] = df["file_path_folder"] + "\\" + df["file_name"]
+        list_chunk_videos = get_list_chunk_videos(df,
+                                                  max_size_mb,
+                                                  duration_limit)
+
+        df = create_column_number_block_file_output(df,
+                                                    list_chunk_videos,
+                                                    start_index_output)
+
+        create_report_backup(df=df,
+                             path_file_report=file_path_report,
+                             tag="6_join_plan")
+        df.to_excel(file_path_report, index=False)
+
+    # process each video block
+    need_join = True
+    while need_join:
+        list_join_job = get_next_join_job(file_path_report)
+        if list_join_job is False:
+            logging.info("\nThere are no more videos to join")
+            need_join = False
+            continue
+
+        file_output, list_file_path = list_join_job
+
+        # add transition effect if applicable
+        list_file_path_to_join = list_file_path.copy()
+        if transition_status:
+            list_file_path_to_join = transition_update_chunk_videos(list_file_path)
+
+        while True:
+            # Do videos join
+            list_dict_videos_duration = do_videos_join(
+                list_file_path_to_join, file_output, path_folder_videos_cache,
+            )
+
+            # check consistency of file_output
+            size_origin = sum([os.path.getsize(x) for x in list_file_path_to_join])
+            size_final = os.path.getsize(file_output)
+            if size_final > size_origin*0.9:
+                break
 
         # Update report
-        list_file_path_original = list_chunk_videos_original[index]
         df = join_videos_process_df(
             df,
-            list_file_path_original,
-            file_name_output,
             list_dict_videos_duration,
             transition_status,
         )
 
-        # # register file_name_output in dataframe
-        mask_files_joined = df["file_path"].isin(list_file_path)
-        df.loc[mask_files_joined, "file_output"] = file_name_output
+        df = mark_join_job_done(df, file_output)
 
-        df.loc[mask_files_joined, "file_path_output"] = os.path.abspath(
-            file_path_output
-        )
 
+        create_report_backup(df=df,
+                             path_file_report=file_path_report,
+                             tag="7_joined")
+        df.to_excel(file_path_report, index=False)
+
+    # update col duration name after adjust by join
     df = join_videos_update_col_duration(df)
-    print(f"total: {len(list_chunk_videos)} videos")
+
     return df
 
 
@@ -671,7 +742,16 @@ def save_metadata_json_files(list_dict_inf_ffprobe, path_file_report):
             json.dump(dict_metadata, fout, indent=2)
 
 
-def step_create_report_filled(path_dir, path_file_report, video_extensions):
+def step_create_report_filled(path_dir, path_file_report, video_extensions, reencode_plan='group'):
+    """
+    - create report with path_file video list
+    - prefill reencode plan
+
+    Args:
+        path_dir (str): project folder path
+        path_file_report (str): output path_file report
+        video_extensions (list): list of video extensions to consider
+    """
 
     list_file_selected = \
         video_report.get_list_path_video(path_dir, video_extensions)
@@ -687,8 +767,9 @@ def step_create_report_filled(path_dir, path_file_report, video_extensions):
     # sort path_file by natural human way
     df = df_sort_human(df, key_column_name="path_file")
 
+
     # prefill column video_resolution_to_change
-    df = prefill_reencode_plan(df)
+    df = prefill.load(df, reencode_plan)
 
     # save
     df.to_excel(path_file_report, index=False)
@@ -777,11 +858,9 @@ def set_join_videos(
     activate_transition="false",
 ):
 
-    df = pd.read_excel(path_file_report, engine="openpyxl")
-
     transition_status = get_transition_effect_status(activate_transition)
     df = join_videos(
-        df,
+        path_file_report,
         mb_limit,
         filename_output,
         path_folder_videos_joined,
@@ -795,7 +874,7 @@ def set_join_videos(
     # backup joined
     create_report_backup(df=df,
                          path_file_report=path_file_report,
-                         tag="6_joined")
+                         tag="7_joined")
 
 
 def set_path_file_report(path_dir):
@@ -898,6 +977,15 @@ def get_path_file_report(path_file_report, path_dir):
     return path_file_report
 
 
+def join_process_has_started(path_file_report):
+
+    df = pd.read_excel(path_file_report, engine="openpyxl")
+    if 'split_file_folder_origin' in df.columns:
+        return True
+    else:
+        return False
+
+
 def main():
 
     folder_script_path = get_folder_script_path()
@@ -908,6 +996,7 @@ def main():
     duration_limit = config_data["duration_limit"]
     video_extensions = config_data["video_extensions"].split(",")
     start_index = int(config_data["start_index"])
+    reencode_plan = config_data["reencode_plan"]
     path_file_report = None
     path_dir = None
     ensure_folder_existence(["projects"])
@@ -919,7 +1008,8 @@ def main():
             path_file_report = set_path_file_report(path_dir)
             step_create_report_filled(path_dir,
                                       path_file_report,
-                                      video_extensions)
+                                      video_extensions,
+                                      reencode_plan)
 
             print(
                 "\nIf necessary, change the reencode plan in the column "
@@ -984,19 +1074,22 @@ def main():
             )
             duration_limit = get_duration_limit(duration_limit)
 
-            # establishes separation criteria for the join videos step
-            set_group_column(path_file_report)
+            if join_process_has_started(path_file_report):
+                pass
+            else:
+                # establishes separation criteria for the join videos step
+                set_group_column(path_file_report)
 
-            # break_point
-            # fmt: off
-            input("Review the file and then type something to "
-                  "start the process that look for videos that "
-                  "are too big and should be splitted")
+                # break_point
+                # fmt: off
+                input("Review the file and then type something to "
+                      "start the process that look for videos that "
+                      "are too big and should be splitted")
 
-            set_split_videos(path_file_report,
-                             mb_limit,
-                             path_folder_videos_splitted,
-                             duration_limit)
+                set_split_videos(path_file_report,
+                                 mb_limit,
+                                 path_folder_videos_splitted,
+                                 duration_limit)
 
             # join all videos
             set_join_videos(

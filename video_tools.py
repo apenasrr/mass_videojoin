@@ -80,9 +80,6 @@ def change_width_height_mp4(
 
     logging.info(f"Changing height to {size_height}: {path_file_video_origin}")
 
-    maxrate = get_maxrate(size_height)
-    str_bufsize = str(maxrate * 2)
-    str_maxrate = str(maxrate)
     size_height = str(size_height)
 
     # for fix audio codec to aac | https://trac.ffmpeg.org/wiki/Encode/AAC
@@ -91,34 +88,47 @@ def change_width_height_mp4(
         + f'-vf "scale=w={size_width}:h={size_height}:'
         + "force_original_aspect_ratio=1,"
         + f'pad={size_width}:{size_height}:(ow-iw)/2:(oh-ih)/2" '
-        + "-c:v libx264 -preset ultrafast -flags +global_header "
-        + "-pix_fmt yuv420p -profile:v baseline -movflags +faststart "
-        + f"-maxrate {str_maxrate}k "
-        + f'-bufsize {str_bufsize}k -c:a aac "{path_file_video_dest}"'
+        + "-c:v libx264 -crf 18 -maxrate 2.5M -bufsize 4M -preset ultrafast -flags +global_header "
+        + "-pix_fmt yuv420p -profile:v baseline -tune zerolatency -movflags +faststart "
+        + f'-c:a aac "{path_file_video_dest}"'
     )
 
     os.system(stringa)
     logging.info("Done")
 
 
-def change_height_width_mp4(
-    path_file_video_origin, size_height, size_width, path_file_video_dest
-):
+def get_cmd_convert_streaming(path_file_video_origin, path_file_video_dest):
     """
-    More info: https://www.reck.dk/ffmpeg-autoscale-on-height-or-width/
-    :input: size_height: Eg. 480, 720, 1080...
-    :input: size_width: Eg. 854, 1280, 1920...
+    Inf.: https://trac.ffmpeg.org/wiki/StreamingGuide
     """
 
-    logging.info(f"Changing height to {size_height}: {path_file_video_origin}")
-    size_height = str(size_height)
+    # TODO: If  AAC AUDIO_CODEC, set -c:a as 'copy'
+
     stringa = (
-        f'ffmpeg -y -i "{path_file_video_origin}" -vf '
-        + f"scale={size_width}:{size_height},setsar=1:1 -c:v libx264 "
-        + f'-c:a copy "{path_file_video_dest}"'
+        f'ffmpeg -y -i "{path_file_video_origin}" '
+        + "-c:v libx264 -crf 18 -maxrate 2.5M -bufsize 4M "
+        + "-preset ultrafast "
+        + "-flags +global_header "
+        + "-pix_fmt yuv420p "
+        + "-profile:v baseline "
+        + "-tune zerolatency "
+        + "-movflags +faststart "
+        + "-c:a aac "
+        + f'"{path_file_video_dest}"'
     )
+    return stringa
+
+
+def convert_streaming(path_file_video_origin, path_file_video_dest):
+
+    stringa = get_cmd_convert_streaming(
+                path_file_video_origin, path_file_video_dest
+                )
+
     os.system(stringa)
     logging.info("Done")
+
+#TODO: create function to convert to mp4 without reencode. Case of .ts from tubedigger
 
 
 def split_mp4(
