@@ -11,7 +11,7 @@ from utils_mass_videojoin import (
     exclude_all_files_from_folder,
     get_file_name_dest,
 )
-from video_tools import change_width_height_mp4
+from video_tools import change_width_height_mp4, convert_mp4_wo_reencode
 
 
 def logging_config():
@@ -133,9 +133,21 @@ def reencode_video(dict_, path_folder_encoded):
     # Make video reencode
     logging.info(f"Start reencode: {path_file_origin}")
 
-    change_width_height_mp4(
-        path_file_origin, size_height, size_width, path_file_dest
-    )
+    video_codec = dict_["video_codec"]
+    audio_codec = dict_["audio_codec"]
+    video_height = dict_["video_resolution_height"]
+    video_width = dict_["video_resolution_width"]
+    if (
+        video_codec == "h264"
+        and audio_codec == "aac"
+        and video_height == size_height
+        and video_width == size_width
+    ):
+        convert_mp4_wo_reencode(path_file_origin, path_file_dest)
+    else:
+        change_width_height_mp4(
+            path_file_origin, size_height, size_width, path_file_dest
+        )
 
 
 def ask_for_delete_old_videos_encode(path_folder_encoded):

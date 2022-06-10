@@ -1,3 +1,4 @@
+import os
 from turtle import fd
 
 from utils_mass_videojoin import get_serie_sub_folder
@@ -14,13 +15,30 @@ def include_sub_folder(df):
 
 
 def include_video_resolution_to_change(df):
+    """Define which videos should be converted.
 
-    mask_cv_ok = df['video_codec'].isin(['h264'])
-    mask_ca_ok = df['audio_codec'].isin(['aac'])
-    mask_isavc = df['is_avc'].isin([1])
-    mask_ok = mask_cv_ok & mask_ca_ok & mask_isavc
-    df['video_resolution_to_change'] = ''
-    df.loc[~mask_ok, 'video_resolution_to_change'] = df.loc[~mask_ok, 'resolution']
+    Args:
+        df (pd.DataFrame): video_details dataframe.
+            Required columns: 'video_codec', 'audio_codec', 'is_avc',
+                              'resolution'
+    Returns:
+        pd.DataFrame:
+            Original dataframe with new column 'video_resolution_to_change'
+            with same values as 'resolution' for videos that should be
+            converted.
+    """
+
+    mask_cv_ok = df["video_codec"].isin(["h264"])
+    mask_ca_ok = df["audio_codec"].isin(["aac"])
+    mask_isavc = df["is_avc"].isin([1])
+    mask_mp4 = df["path_file"].apply(
+        lambda x: os.path.splitext(x)[-1].lower() == ".mp4"
+    )
+    mask_ok = mask_cv_ok & mask_ca_ok & mask_isavc & mask_mp4
+    df["video_resolution_to_change"] = ""
+    df.loc[~mask_ok, "video_resolution_to_change"] = df.loc[
+        ~mask_ok, "resolution"
+    ]
     return df
 
 

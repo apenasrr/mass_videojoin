@@ -70,6 +70,20 @@ def get_maxrate(size_height):
     return maxrate
 
 
+def convert_mp4_wo_reencode(path_file_video_origin, path_file_video_dest):
+
+    logging.info(f"Convert video extension without reencode: {path_file_video_origin}")
+
+    stringa = (
+        f'ffmpeg -y -i "{path_file_video_origin}" '
+        + "-vcodec copy "
+        + f'-acodec copy "{path_file_video_dest}"'
+    )
+
+    os.system(stringa)
+    logging.info("Done")
+
+
 def change_width_height_mp4(
     path_file_video_origin, size_height, size_width, path_file_video_dest
 ):
