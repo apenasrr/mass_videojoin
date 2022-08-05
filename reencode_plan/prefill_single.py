@@ -31,9 +31,7 @@ def include_video_resolution_to_change(df):
     mask_cv_ok = df["video_codec"].isin(["h264"])
     mask_ca_ok = df["audio_codec"].isin(["aac"])
     mask_isavc = df["is_avc"].isin([1])
-    mask_mp4 = df["path_file"].apply(
-        lambda x: os.path.splitext(x)[-1].lower() == ".mp4"
-    )
+    mask_mp4 = df["format_name"] == "mov,mp4,m4a,3gp,3g2,mj2"
     mask_ok = mask_cv_ok & mask_ca_ok & mask_isavc & mask_mp4
     df["video_resolution_to_change"] = ""
     df.loc[~mask_ok, "video_resolution_to_change"] = df.loc[
