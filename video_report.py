@@ -114,6 +114,7 @@ def get_list_dict_inf_ffprobe(list_path_file):
         d = {}
         d["path_file"] = file_selected
         # generate raw metadata
+        logging.info("Catching video metadata: %s", file_selected)
         dict_inf_ffprobe = ffprobe(file_selected).get_output_as_dict()
         d["metadata"] = dict_inf_ffprobe
         list_dict.append(d)
