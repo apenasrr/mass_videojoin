@@ -35,8 +35,8 @@ def get_file_name_dest(
 
 def normalize_string(string_actual):
     """Replace letters with accent for letter without accent.
-    Strip accents from characters.
-    e.g.: Módulo Fácil -> Modulo Facil
+    Keep all letters in low case.
+    e.g.: Módulo Fácil -> modulo facil
 
     Args:
         string_actual (str): string to be normalized
@@ -45,7 +45,7 @@ def normalize_string(string_actual):
         [str]: string normalized
     """
 
-    string_norm = unidecode.unidecode(string_actual)
+    string_norm = unidecode.unidecode(string_actual.lower())
 
     return string_norm
 
